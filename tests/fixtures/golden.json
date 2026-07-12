@@ -1,0 +1,38 @@
+{
+  "r1": {
+    "round": "r1",
+    "attempt": 0,
+    "seed": 7102986142754098260,
+    "final_tick": 2400,
+    "final_score": 100,
+    "final_stars": 3,
+    "final_hash": "557fd41362fcddd7",
+    "bot": {
+      "round": "r1",
+      "score": 100,
+      "stars": 3,
+      "delivered": 8,
+      "overheat_losses": 0,
+      "worker_util": 0.58,
+      "final_hash": "557fd41362fcddd7"
+    }
+  },
+  "r2": {
+    "round": "r2",
+    "attempt": 0,
+    "seed": 11205243052838528051,
+    "final_tick": 3600,
+    "final_score": 130,
+    "final_stars": 2,
+    "final_hash": "08ae609eb645bb20",
+    "bot": {
+      "round": "r2",
+      "score": 130,
+      "stars": 2,
+      "delivered": 10,
+      "overheat_losses": 0,
+      "worker_util": 0.228,
+      "final_hash": "08ae609eb645bb20"
+    }
+  }
+}

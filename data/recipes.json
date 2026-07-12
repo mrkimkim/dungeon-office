@@ -1,0 +1,9 @@
+[
+  { "id": "t_ingot",     "type": "transform",  "facility": "furnace",     "in": ["ore"],              "out": "ingot",     "work_ticks": 160, "overheat_grace_ticks": 200 },
+  { "id": "t_charcoal",  "type": "transform",  "facility": "furnace",     "in": ["wood"],             "out": "charcoal",  "work_ticks": 160, "overheat_grace_ticks": 200 },
+  { "id": "t_manadust",  "type": "transform",  "facility": "manaforge",   "in": ["mana_ore"],         "out": "mana_dust", "work_ticks": 480, "overheat_grace_ticks": 120 },
+  { "id": "s_enhstone",  "type": "synthesize", "facility": "synth",       "in": ["mana_dust","ingot"],"out": "enh_stone", "work_ticks": 160, "workers": 1 },
+  { "id": "c_dagger",    "type": "craft",      "facility": "weapon_bench","in": ["ingot"],            "out": "dagger",    "work_ticks": 160, "workers": 1 },
+  { "id": "c_sword",     "type": "craft",      "facility": "weapon_bench","in": ["ingot","charcoal"], "out": "sword",     "work_ticks": 200, "workers": 1 },
+  { "id": "e_plus1",     "type": "enhance",    "facility": "anvil",       "in": ["enh_stone"],                            "work_ticks": 160, "workers": 1 }
+]

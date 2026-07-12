@@ -1,0 +1,22 @@
+{
+  "_note": "M0 임시 R1 — 일꾼 2명 구간(C-4 검증). 화로 2(비동기·과열) + 제작대 2(동기·워커)로 2일꾼 병렬이 성립하는 균형. 스케줄링의 핵심: 화로를 먹이고 치우며(과열) 두 일꾼을 제작으로 계속 굴리기.",
+  "id": "r1",
+  "workers": 2,
+  "deadline_ticks": 2400,
+  "inventory_cap": 10,
+  "facilities": [
+    { "kind": "furnace" },
+    { "kind": "furnace" },
+    { "kind": "weapon_bench" },
+    { "kind": "weapon_bench" }
+  ],
+  "request_slots": 2,
+  "script": [
+    { "at_ticks": 0,   "request": "rq_dagger" },
+    { "at_ticks": 120, "request": "rq_dagger" }
+  ],
+  "pools": [
+    { "from_ticks": 300, "to_ticks": 2100, "pool": ["rq_dagger", "rq_dagger", "rq_sword"], "interval_ticks": [180, 300] }
+  ],
+  "cutlines": { "fail_under": 20, "star1": 20, "star2": 60, "star3": 100 }
+}

@@ -1,0 +1,17 @@
+{
+  "_note": "M0 임시 데이터. 확정 목록은 items-recipes.md. strategic은 정확히 1종(§8.4-4).",
+  "raws": ["ore", "wood", "mana_ore"],
+  "materials": [
+    { "id": "ore",       "tier": 1, "strategic": false },
+    { "id": "wood",      "tier": 1, "strategic": false },
+    { "id": "mana_ore",  "tier": 1, "strategic": false },
+    { "id": "ingot",     "tier": 1, "strategic": false },
+    { "id": "charcoal",  "tier": 1, "strategic": false },
+    { "id": "mana_dust", "tier": 1, "strategic": true  },
+    { "id": "enh_stone", "tier": 1, "strategic": false }
+  ],
+  "equipment": [
+    { "id": "dagger", "class": "weapon", "base_score": 10 },
+    { "id": "sword",  "class": "weapon", "base_score": 20 }
+  ]
+}
