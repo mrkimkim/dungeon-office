@@ -1,5 +1,0 @@
-[
-  { "id": "rq_dagger",   "equipment": "dagger", "min_enhance": 0, "score": 10, "patience_ticks": 600  },
-  { "id": "rq_sword",    "equipment": "sword",  "min_enhance": 0, "score": 20, "patience_ticks": 900  },
-  { "id": "rq_sword_p1", "equipment": "sword",  "min_enhance": 1, "score": 75, "patience_ticks": 2700, "forecast": true }
-]
