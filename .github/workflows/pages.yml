@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - agent/mvp-implementation-readiness
     paths:
       - "site/**"
       - ".github/workflows/pages.yml"
@@ -21,13 +20,9 @@ concurrency:
 
 jobs:
   build:
-    # The agent branch clause is a one-time bootstrap. Its exact marker keeps
-    # unrelated branch pushes from publishing and is removed after deployment.
-    if: >-
-      github.ref == 'refs/heads/main' ||
-      github.event_name == 'workflow_dispatch' ||
-      (github.ref == 'refs/heads/agent/mvp-implementation-readiness' &&
-      contains(github.event.head_commit.message, '[pages-bootstrap]'))
+    # Branch pushes never publish. A reviewed main push or an explicit manual
+    # dispatch may publish the exact ref selected by the repository owner.
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -45,11 +40,7 @@ jobs:
           path: ./_site
 
   deploy:
-    if: >-
-      github.ref == 'refs/heads/main' ||
-      github.event_name == 'workflow_dispatch' ||
-      (github.ref == 'refs/heads/agent/mvp-implementation-readiness' &&
-      contains(github.event.head_commit.message, '[pages-bootstrap]'))
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
