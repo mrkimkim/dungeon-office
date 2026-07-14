@@ -1,0 +1,55 @@
+{
+  "schema": "CommandFixtureV1",
+  "name": "R1 one dagger delivery",
+  "round_id": "R1",
+  "commands": [
+    {
+      "tick": 0,
+      "sequence": 1,
+      "type": "move",
+      "payload": {
+        "source": {"kind": "supply", "item_id": "MAT_IRON_ORE"},
+        "destination": {"kind": "facility_input", "facility_id": "FAC_FURNACE"}
+      }
+    },
+    {
+      "tick": 160,
+      "sequence": 2,
+      "type": "store",
+      "payload": {"facility_id": "FAC_FURNACE"}
+    },
+    {
+      "tick": 160,
+      "sequence": 3,
+      "type": "move",
+      "payload": {
+        "source": {"kind": "inventory", "slot": 0},
+        "destination": {"kind": "facility_input", "facility_id": "FAC_WEAPON_BENCH"}
+      }
+    },
+    {
+      "tick": 160,
+      "sequence": 4,
+      "type": "start",
+      "payload": {"facility_id": "FAC_WEAPON_BENCH"}
+    },
+    {
+      "tick": 280,
+      "sequence": 5,
+      "type": "store",
+      "payload": {"facility_id": "FAC_WEAPON_BENCH"}
+    },
+    {
+      "tick": 280,
+      "sequence": 6,
+      "type": "deliver",
+      "payload": {"source": {"kind": "inventory", "slot": 0}}
+    }
+  ],
+  "expected": {
+    "score": 10,
+    "stars": 1,
+    "deliveries": 1,
+    "status": "ended"
+  }
+}

@@ -1,0 +1,130 @@
+{
+  "schema": "CatalogV1",
+  "data_version": 1,
+  "source_documents": [
+    {"id": "CNT-ITEM-001", "version": "0.1.0"},
+    {"id": "CNT-RECIPE-001", "version": "0.1.0"},
+    {"id": "SYS-ECON-001", "version": "0.1.0"},
+    {"id": "BAL-MVP-001", "version": "0.2.0"},
+    {"id": "TECH-SIM-001", "version": "0.1.0"}
+  ],
+  "rules": {
+    "tick_rate": 20,
+    "overheat_grace_ticks": 160,
+    "overheat_danger_ticks": 60,
+    "request_urgent_ticks": 200,
+    "deadline_warning_ticks": 600,
+    "deadline_countdown_ticks": 200
+  },
+  "items": [
+    {"id": "MAT_IRON_ORE", "display_name": "철광석", "category": "raw_material", "enhanceable": false},
+    {"id": "MAT_WOOD", "display_name": "목재", "category": "raw_material", "enhanceable": false},
+    {"id": "MAT_MANA_SHARD", "display_name": "마력 파편", "category": "raw_material", "enhanceable": false},
+    {"id": "MAT_IRON_INGOT", "display_name": "철 주괴", "category": "processed_material", "enhanceable": false},
+    {"id": "MAT_CHARCOAL", "display_name": "목탄", "category": "processed_material", "enhanceable": false},
+    {"id": "MAT_ENHANCEMENT_STONE", "display_name": "강화석", "category": "processed_material", "enhanceable": false},
+    {"id": "EQ_DAGGER", "display_name": "단검", "category": "equipment", "enhanceable": true},
+    {"id": "EQ_IRON_SWORD", "display_name": "철검", "category": "equipment", "enhanceable": true}
+  ],
+  "facilities": [
+    {"id": "FAC_SUPPLY", "display_name": "재료 공급함", "role": "supply"},
+    {"id": "FAC_FURNACE", "display_name": "용광로", "role": "processor"},
+    {"id": "FAC_WEAPON_BENCH", "display_name": "무기 제작대", "role": "worker_processor"},
+    {"id": "FAC_SYNTH_BENCH", "display_name": "합성 작업대", "role": "worker_processor"},
+    {"id": "FAC_ENHANCE_ANVIL", "display_name": "강화 모루", "role": "worker_processor"},
+    {"id": "FAC_DELIVERY", "display_name": "납품대", "role": "delivery"},
+    {"id": "FAC_TRASH", "display_name": "쓰레기통", "role": "trash"}
+  ],
+  "recipes": [
+    {
+      "id": "RCP_SMELT_IRON",
+      "facility_id": "FAC_FURNACE",
+      "inputs": [{"item_id": "MAT_IRON_ORE", "enhancement_level": 0, "count": 1}],
+      "output": {"item_id": "MAT_IRON_INGOT", "enhancement_level": 0, "count": 1},
+      "worker_mode": "none",
+      "overheat_output": true,
+      "duration_ticks": 160
+    },
+    {
+      "id": "RCP_BURN_CHARCOAL",
+      "facility_id": "FAC_FURNACE",
+      "inputs": [{"item_id": "MAT_WOOD", "enhancement_level": 0, "count": 1}],
+      "output": {"item_id": "MAT_CHARCOAL", "enhancement_level": 0, "count": 1},
+      "worker_mode": "none",
+      "overheat_output": true,
+      "duration_ticks": 160
+    },
+    {
+      "id": "RCP_CRAFT_DAGGER",
+      "facility_id": "FAC_WEAPON_BENCH",
+      "inputs": [{"item_id": "MAT_IRON_INGOT", "enhancement_level": 0, "count": 1}],
+      "output": {"item_id": "EQ_DAGGER", "enhancement_level": 0, "count": 1},
+      "worker_mode": "one",
+      "overheat_output": false,
+      "duration_ticks": 120
+    },
+    {
+      "id": "RCP_CRAFT_IRON_SWORD",
+      "facility_id": "FAC_WEAPON_BENCH",
+      "inputs": [{"item_id": "MAT_IRON_INGOT", "enhancement_level": 0, "count": 2}],
+      "output": {"item_id": "EQ_IRON_SWORD", "enhancement_level": 0, "count": 1},
+      "worker_mode": "one",
+      "overheat_output": false,
+      "duration_ticks": 180
+    },
+    {
+      "id": "RCP_SYNTH_ENHANCEMENT_STONE",
+      "facility_id": "FAC_SYNTH_BENCH",
+      "inputs": [
+        {"item_id": "MAT_MANA_SHARD", "enhancement_level": 0, "count": 1},
+        {"item_id": "MAT_CHARCOAL", "enhancement_level": 0, "count": 1}
+      ],
+      "output": {"item_id": "MAT_ENHANCEMENT_STONE", "enhancement_level": 0, "count": 1},
+      "worker_mode": "one",
+      "overheat_output": false,
+      "duration_ticks": 200
+    },
+    {
+      "id": "RCP_ENHANCE_DAGGER_P1",
+      "facility_id": "FAC_ENHANCE_ANVIL",
+      "inputs": [
+        {"item_id": "EQ_DAGGER", "enhancement_level": 0, "count": 1},
+        {"item_id": "MAT_ENHANCEMENT_STONE", "enhancement_level": 0, "count": 1}
+      ],
+      "output": {"item_id": "EQ_DAGGER", "enhancement_level": 1, "count": 1},
+      "worker_mode": "one",
+      "overheat_output": false,
+      "duration_ticks": 240
+    },
+    {
+      "id": "RCP_ENHANCE_IRON_SWORD_P1",
+      "facility_id": "FAC_ENHANCE_ANVIL",
+      "inputs": [
+        {"item_id": "EQ_IRON_SWORD", "enhancement_level": 0, "count": 1},
+        {"item_id": "MAT_ENHANCEMENT_STONE", "enhancement_level": 0, "count": 1}
+      ],
+      "output": {"item_id": "EQ_IRON_SWORD", "enhancement_level": 1, "count": 1},
+      "worker_mode": "one",
+      "overheat_output": false,
+      "duration_ticks": 240
+    }
+  ],
+  "requests": [
+    {"id": "REQ_DAGGER_STD", "item_id": "EQ_DAGGER", "required_level": 0, "score": 10, "patience_ticks": 900, "forecast": false},
+    {"id": "REQ_SWORD_STD", "item_id": "EQ_IRON_SWORD", "required_level": 0, "score": 20, "patience_ticks": 1100, "forecast": false},
+    {"id": "REQ_DAGGER_RUSH", "item_id": "EQ_DAGGER", "required_level": 0, "score": 10, "patience_ticks": 480, "forecast": false},
+    {"id": "REQ_SWORD_RUSH", "item_id": "EQ_IRON_SWORD", "required_level": 0, "score": 20, "patience_ticks": 720, "forecast": false},
+    {"id": "REQ_SWORD_FORECAST", "item_id": "EQ_IRON_SWORD", "required_level": 0, "score": 40, "patience_ticks": 600, "forecast": true},
+    {"id": "REQ_DAGGER_P1", "item_id": "EQ_DAGGER", "required_level": 1, "score": 40, "patience_ticks": 1400, "forecast": true},
+    {"id": "REQ_SWORD_P1_FORECAST", "item_id": "EQ_IRON_SWORD", "required_level": 1, "score": 70, "patience_ticks": 1000, "forecast": true}
+  ],
+  "shop_products": [
+    {
+      "id": "SHOP_ENHANCEMENT_KIT",
+      "display_name": "강화 설비 세트",
+      "price_gold": 150,
+      "requires_round_clear": "R4",
+      "grants_capability": "enhancement_capability_owned"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+title: "던전 오피스"
+description: "던전 오피스 공식 지원 및 개인정보처리방침"
+lang: ko-KR
+url: "https://mrkimkim.github.io"
+baseurl: "/dungeon-office"
+theme: minima
+timezone: Asia/Seoul
+header_pages:
+  - index.md
+  - privacy/index.md
+  - licenses/index.md
