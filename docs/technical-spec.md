@@ -7,7 +7,7 @@
 | 목적 | 승인된 5라운드 MVP를 Android 앱으로 구현·검증·빌드·배포하는 프로젝트와 도구 체인 경계를 고정한다. |
 | 담당 영역 | Godot 프로젝트 구조, Android 앱 설정, 오프라인·생명주기 경계, 로컬 진단, 개발 환경, export·서명·CI |
 | 상태 | Draft |
-| 버전 | 2.0.0 |
+| 버전 | 2.1.0 |
 | 적용 범위 | Google Play에 배포할 Android 단독 무료 MVP |
 | 상위 원칙 문서 | `GDD-001`, `MVP-001` |
 | `depends_on` | `MVP-001`, `BUS-MVP-001`, `REL-PLAY-001`, `UX-MVP-001`, `UI-MVP-001`, `TECH-SIM-001`, `TECH-DATA-001` |
@@ -141,7 +141,7 @@ data ─> 패키지 JSON·Markdown
 
 ## 5. 앱 유스케이스 경계
 
-완성 MVP의 composition root는 최소 다음 유스케이스 경계를 제공한다. 현재 작은 스캐폴드에서는 별도 빈 coordinator 클래스를 만들지 않고 `ui/main.gd`의 private 함수와 `app/` 서비스 조합으로 시작할 수 있다. 기능이 추가되어 UI가 파일·프로필을 직접 조작하게 되는 시점에는 화면 독립 coordinator로 추출한다.
+MVP의 composition root는 최소 다음 유스케이스 경계를 제공한다. 현재 그레이박스 구현은 `ui/main.gd`의 private 화면·흐름 함수, `ui/play_screen.gd`의 직접 조작 화면과 `app/` 서비스를 조합하며 별도 빈 coordinator 클래스를 두지 않는다. UI 독립 유스케이스가 여러 화면에서 중복되거나 파일·프로필 조작 책임이 UI에 확산되면 화면 독립 coordinator로 추출한다.
 
 ```text
 boot()
@@ -267,7 +267,7 @@ LocalPlaytestEventV1 {
 | `Android Debug` | APK | 로컬·실기 반복 | Android debug key |
 | `Android Release` | AAB | Play 후보 출시 gate | 저장소 밖 upload key |
 
-두 preset은 같은 package ID, ABI, 리소스와 오프라인 권한을 사용한다. Debug는 `gradle_build/use_gradle_build=false`, Release AAB는 `true`다. Release export 도구는 `android/.build_version`이 없을 때 `--install-android-build-template`로 Godot 공식 template를 만들며 `android/` 전체는 Git에서 제외한다. release preset은 `release` custom feature를 제공한다. 현재 스캐폴드에는 개발 전용 원격 기능이나 플레이테스트 로그가 없으며, 이후 로컬 진단을 추가하면 이 feature로 공개 후보에서 비활성임을 테스트해야 한다. `docs/`, `tests/`, `tools/`, `.github/`, `build/`, `dist/`는 앱에 넣지 않고 `data/*.json`, 앱 리소스, `site/**/*.md` 법적 원문만 포함한다.
+두 preset은 같은 package ID, ABI, 리소스와 오프라인 권한을 사용한다. Debug는 `gradle_build/use_gradle_build=false`, Release AAB는 `true`다. Release export 도구는 `android/.build_version`이 없을 때 `--install-android-build-template`로 Godot 공식 template를 만들며 `android/` 전체는 Git에서 제외한다. release preset은 `release` custom feature를 제공한다. 현재 구현에는 개발 전용 원격 기능이나 로컬 플레이테스트 로그 writer가 없다. 이후 로컬 진단을 추가하면 이 feature로 공개 후보에서 비활성임을 테스트해야 한다. `docs/`, `tests/`, `tools/`, `.github/`, `build/`, `dist/`는 앱에 넣지 않고 `data/*.json`, 앱 리소스, `site/**/*.md` 법적 원문만 포함한다.
 
 ### 10.2 산출물 검증
 
@@ -325,7 +325,7 @@ adb install -r build/android/dungeon-office-debug.apk
 
 - `check_env.sh`: §3의 Godot·template·JDK·SDK package를 검사하고 adb 기기 상태를 보고한다. 실기 gate의 `--require-device`는 연결 기기가 없으면 실패한다.
 - `check_offline.sh`: §7.3 금지 의존성과 설정을 검사한다.
-- `test.sh`: 데이터, sim, save, app 유스케이스의 자체 headless runner를 실행한다.
+- `test.sh`: 문서 DAG, 데이터, sim, save, R1~R5 QA 명령 경로, 직접 조작 UI와 app 흐름의 자체 headless runner를 실행한다.
 - `export_android_release.sh`: 비밀 환경 변수를 검사하고 버전 일치 Gradle template를 필요할 때 설치한 뒤 서명 AAB를 만든다.
 - `verify_android_apk.sh`, `verify_android_aab.sh`: package·SDK·금지 권한·게임 카테고리·HOME 부재·arm64 단독 ABI·금지 SDK·백업·런처·법적 원문을 최종 산출물에서 검사한다. AAB는 서명 누락과 임의 signer도 거부한다.
 - import check는 누락 리소스·GDScript parse 오류를 차단한다.
@@ -342,9 +342,9 @@ adb install -r build/android/dungeon-office-debug.apk
 1. 저장소 checkout
 2. Godot `4.7-stable` headless 설치와 버전 확인
 3. `tools/check_offline.sh`로 금지 소스·설정 검사
-4. `tools/test.sh`로 프로젝트 import와 현재 데이터·sim·save headless 테스트 실행
+4. `tools/test.sh`로 프로젝트 import와 문서·데이터·sim·save·UI·app 흐름 headless 테스트 실행
 
-하나라도 실패하면 병합할 수 없다. 간헐적 해시 차이는 재실행으로 통과시키지 않는다. 현재 CI는 Android SDK·keystore를 설치하지 않고 APK/AAB, JUnit, 테스트 artifact를 만들지 않는다. MVP 초기 스캐폴드에 사용하지 않는 CI 구조를 미리 추가하지 않는다.
+하나라도 실패하면 병합할 수 없다. 간헐적 해시 차이는 재실행으로 통과시키지 않는다. 현재 CI는 Android SDK·keystore를 설치하지 않고 APK/AAB, JUnit, 테스트 artifact를 만들지 않는다. 필요성이 승인되지 않은 추가 CI 구조를 미리 만들지 않는다.
 
 ### 13.2 로컬 Android gate
 
@@ -357,7 +357,7 @@ Android 관련 확인은 현재 연결된 물리 기기와 로컬 SDK에서 §12
 5. 비행기 모드 cold start·R1 smoke·snapshot 복귀
 6. API 24 emulator smoke
 
-결과는 릴리스 체크 기록에 commit SHA, 기기·API, APK SHA-256과 함께 남긴다. 기기 serial과 서명 비밀은 기록하지 않는다.
+결과는 `QA-MVP-001` §5.1의 후보 QA Issue에 commit SHA, 기기·API, APK SHA-256과 함께 남긴다. 기기 serial과 서명 비밀은 기록하지 않는다. 5인 관찰 결과는 같은 문서 §7.3 양식을 사용하되 원본 녹화·인터뷰는 저장소와 Issue에 올리지 않는다.
 
 ### 13.3 Play 후보 전 추가할 보호 gate
 

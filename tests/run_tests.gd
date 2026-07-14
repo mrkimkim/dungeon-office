@@ -6,6 +6,9 @@ const TestSimulator = preload("res://tests/test_simulator.gd")
 const TestSaveRepository = preload("res://tests/test_save_repository.gd")
 const TestDocumentGraph = preload("res://tests/test_document_graph.gd")
 const TestUi = preload("res://tests/test_ui.gd")
+const TestPlayScreen = preload("res://tests/test_play_screen.gd")
+const TestAppFlow = preload("res://tests/test_app_flow.gd")
+const TestMvpQa = preload("res://tests/test_mvp_qa.gd")
 
 func _init() -> void:
 	var test := TestFrameworkScript.new()
@@ -15,6 +18,9 @@ func _init() -> void:
 	TestSaveRepository.run(test)
 	TestDocumentGraph.run(test)
 	TestUi.run(test)
+	TestPlayScreen.run(test)
+	TestAppFlow.run(test)
+	TestMvpQa.run(test)
 	if test.has_failures():
 		for failure: String in test.failures:
 			printerr("FAIL: %s" % failure)

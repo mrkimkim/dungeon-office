@@ -30,6 +30,7 @@ enum RejectReason {
 	ROUND_NOT_RUNNING,
 	WRONG_TICK,
 	STALE_SEQUENCE,
+	SEQUENCE_GAP,
 	UNKNOWN_COMMAND,
 	PAUSED,
 	ALREADY_PAUSED,
@@ -52,6 +53,7 @@ const REJECT_NONE: String = "none"
 const REJECT_ROUND_NOT_RUNNING: String = "round_not_running"
 const REJECT_WRONG_TICK: String = "wrong_tick"
 const REJECT_STALE_SEQUENCE: String = "stale_sequence"
+const REJECT_SEQUENCE_GAP: String = "sequence_gap"
 const REJECT_UNKNOWN_COMMAND: String = "unknown_command"
 const REJECT_PAUSED: String = "paused"
 const REJECT_ALREADY_PAUSED: String = "already_paused"

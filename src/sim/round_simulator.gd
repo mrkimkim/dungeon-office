@@ -32,6 +32,7 @@ static func create_state(round_definition: Dictionary, catalog: Dictionary) -> D
 			"worker_id": "",
 			"output": null,
 			"overheat_remaining_ticks": 0,
+			"overheat_danger_emitted": false,
 		}
 
 	var state: Dictionary = {
@@ -54,6 +55,10 @@ static func create_state(round_definition: Dictionary, catalog: Dictionary) -> D
 		"deliveries": [],
 		"withdrawal_count": 0,
 		"overheat_loss_count": 0,
+		"threshold_flags": {
+			"deadline_warning_emitted": false,
+			"deadline_countdown_emitted": false,
+		},
 	}
 	var ignored_events: Array = []
 	_release_due_requests(state, round_definition, catalog, ignored_events)
@@ -69,12 +74,15 @@ static func step(
 	var events: Array = []
 	var command_results: Array = []
 	var commands: Array = commands_for_tick.duplicate(true)
+	var control_command_present := false
 	commands.sort_custom(func(left: Dictionary, right: Dictionary) -> bool:
 		return int(left.get("sequence", 0)) < int(right.get("sequence", 0))
 	)
 
 	for raw_command: Variant in commands:
 		var command: Dictionary = raw_command if raw_command is Dictionary else {}
+		if str(command.get("type", "")) in [Contract.COMMAND_PAUSE, Contract.COMMAND_RESUME]:
+			control_command_present = true
 		var result := _apply_command(next_state, command, round_definition, catalog)
 		result["tick"] = int(command.get("tick", -1))
 		result["sequence"] = int(command.get("sequence", -1))
@@ -85,6 +93,11 @@ static func step(
 	if str(next_state.get("status", "")) != "running":
 		return {"state": next_state, "command_results": command_results, "events": events}
 
+	# Pause and resume are control-only calls. Even a rejected control request must not
+	# accidentally spend a simulation interval while the UI reconciles its state.
+	if control_command_present:
+		return {"state": next_state, "command_results": command_results, "events": events}
+
 	if bool(next_state.get("paused", false)):
 		return {"state": next_state, "command_results": command_results, "events": events}
 
@@ -93,6 +106,7 @@ static func step(
 	_advance_overheat(next_state, events)
 	_advance_work(next_state, catalog, events)
 	_advance_request_patience(next_state, round_definition, catalog, events)
+	_emit_threshold_events(next_state, catalog, events)
 
 	next_state["tick"] = int(next_state.get("tick", 0)) + 1
 	_release_due_requests(next_state, round_definition, catalog, events)
@@ -109,6 +123,32 @@ static func step(
 static func state_hash(state: Dictionary) -> String:
 	return Canonical.sha256(state)
 
+static func preview_command(
+	state: Dictionary,
+	type: String,
+	payload: Dictionary,
+	round_definition: Dictionary,
+	catalog: Dictionary
+) -> Dictionary:
+	## Runs the authoritative command validator against a deep copy. UI read models use
+	## this instead of duplicating recipe, inventory, worker, or delivery rules.
+	var probe: Dictionary = state.duplicate(true)
+	var command := Contract.command(
+		int(probe.get("tick", 0)),
+		int(probe.get("next_command_sequence", 1)),
+		type,
+		payload
+	)
+	return _apply_command(probe, command, round_definition, catalog)
+
+static func inspect_source(
+	state: Dictionary,
+	source: Dictionary,
+	round_definition: Dictionary
+) -> Dictionary:
+	var inspected := _peek_source(state, source, round_definition)
+	return inspected.duplicate(true)
+
 static func _apply_command(
 	state: Dictionary,
 	command: Dictionary,
@@ -121,8 +161,11 @@ static func _apply_command(
 		return Contract.rejected(Contract.REJECT_WRONG_TICK)
 
 	var sequence := int(command.get("sequence", -1))
-	if sequence < int(state.get("next_command_sequence", 1)):
+	var expected_sequence := int(state.get("next_command_sequence", 1))
+	if sequence < expected_sequence:
 		return Contract.rejected(Contract.REJECT_STALE_SEQUENCE)
+	if sequence > expected_sequence:
+		return Contract.rejected(Contract.REJECT_SEQUENCE_GAP)
 	state["next_command_sequence"] = sequence + 1
 
 	var type := str(command.get("type", ""))
@@ -140,7 +183,7 @@ static func _apply_command(
 		Contract.COMMAND_DELIVER:
 			return _command_deliver(state, payload, round_definition, catalog)
 		Contract.COMMAND_DISCARD:
-			return _command_discard(state, payload, round_definition)
+			return _command_discard(state, payload, round_definition, catalog)
 		Contract.COMMAND_PAUSE:
 			if bool(state.get("paused", false)):
 				return Contract.rejected(Contract.REJECT_ALREADY_PAUSED)
@@ -172,7 +215,7 @@ static func _command_move(
 		var inventory_slot := _first_empty_inventory_slot(state)
 		if inventory_slot < 0:
 			return Contract.rejected(Contract.REJECT_INVENTORY_FULL)
-		_remove_source(state, source)
+		_remove_source(state, source, catalog)
 		state["inventory"][inventory_slot] = item
 		return Contract.accepted([{
 			"type": "item_moved",
@@ -191,7 +234,7 @@ static func _command_move(
 		trial_inputs.append(item)
 		if _matching_recipes_for_inputs(catalog, facility_id, trial_inputs, false).is_empty():
 			return Contract.rejected(Contract.REJECT_INVALID_RECIPE_INPUT)
-		_remove_source(state, source)
+		_remove_source(state, source, catalog)
 		facility["inputs"].append(item)
 		var exact_recipes := _matching_recipes_for_inputs(catalog, facility_id, facility["inputs"], true)
 		facility["status"] = "ready" if not exact_recipes.is_empty() else "input"
@@ -272,7 +315,7 @@ static func _command_deliver(
 		return Contract.rejected(Contract.REJECT_NO_MATCHING_REQUEST)
 
 	var selected_request: Dictionary = state["active_requests"][selected_index]
-	_remove_source(state, source)
+	_remove_source(state, source, catalog)
 	state["active_requests"].remove_at(selected_index)
 	state["score"] = int(state.get("score", 0)) + int(selected_request.get("score", 0))
 	state["deliveries"].append({
@@ -288,10 +331,14 @@ static func _command_deliver(
 		"score": int(selected_request.get("score", 0)),
 		"total_score": int(state["score"]),
 	}]
-	_activate_waiting_request(state, emitted)
 	return Contract.accepted(emitted)
 
-static func _command_discard(state: Dictionary, payload: Dictionary, round_definition: Dictionary) -> Dictionary:
+static func _command_discard(
+	state: Dictionary,
+	payload: Dictionary,
+	round_definition: Dictionary,
+	catalog: Dictionary
+) -> Dictionary:
 	var source: Dictionary = payload.get("source", {}) if payload.get("source", {}) is Dictionary else {}
 	if str(source.get("kind", "")) == "supply":
 		return Contract.rejected(Contract.REJECT_INVALID_SOURCE)
@@ -299,7 +346,7 @@ static func _command_discard(state: Dictionary, payload: Dictionary, round_defin
 	if not bool(peek.get("ok", false)):
 		return Contract.rejected(str(peek.get("reason", Contract.REJECT_INVALID_SOURCE)))
 	var item: Dictionary = peek["item"]
-	_remove_source(state, source)
+	_remove_source(state, source, catalog)
 	return Contract.accepted([{"type": "item_discarded", "item": item}])
 
 static func _peek_source(state: Dictionary, source: Dictionary, round_definition: Dictionary) -> Dictionary:
@@ -338,7 +385,7 @@ static func _peek_source(state: Dictionary, source: Dictionary, round_definition
 		_:
 			return {"ok": false, "reason": Contract.REJECT_INVALID_SOURCE}
 
-static func _remove_source(state: Dictionary, source: Dictionary) -> void:
+static func _remove_source(state: Dictionary, source: Dictionary, catalog: Dictionary) -> void:
 	match str(source.get("kind", "")):
 		"supply":
 			pass
@@ -347,9 +394,22 @@ static func _remove_source(state: Dictionary, source: Dictionary) -> void:
 		"facility_input":
 			var facility: Dictionary = state["facilities"][str(source["facility_id"])]
 			facility["inputs"].remove_at(int(source["slot"]))
-			facility["status"] = "empty" if facility["inputs"].is_empty() else "input"
+			_recompute_facility_input_status(facility, catalog)
 		"facility_output":
 			_clear_facility_output(state["facilities"][str(source["facility_id"])])
+
+static func _recompute_facility_input_status(facility: Dictionary, catalog: Dictionary) -> void:
+	var inputs: Array = facility.get("inputs", [])
+	if inputs.is_empty():
+		facility["status"] = "empty"
+		return
+	var exact_recipes := _matching_recipes_for_inputs(
+		catalog,
+		str(facility.get("facility_id", "")),
+		inputs,
+		true
+	)
+	facility["status"] = "ready" if not exact_recipes.is_empty() else "input"
 
 static func _begin_recipe(
 	state: Dictionary,
@@ -365,6 +425,7 @@ static func _begin_recipe(
 	facility["worker_id"] = worker_id
 	facility["output"] = null
 	facility["overheat_remaining_ticks"] = 0
+	facility["overheat_danger_emitted"] = false
 	events.append({
 		"type": "work_started",
 		"facility_id": facility.get("facility_id", ""),
@@ -391,6 +452,7 @@ static func _advance_work(state: Dictionary, catalog: Dictionary, events: Array)
 		}
 		facility["status"] = "output"
 		facility["remaining_ticks"] = 0
+		facility["overheat_danger_emitted"] = false
 		if bool(recipe.get("overheat_output", false)):
 			facility["overheat_remaining_ticks"] = int(catalog.get("rules", {}).get("overheat_grace_ticks", 0))
 		var worker_id := str(facility.get("worker_id", ""))
@@ -430,26 +492,29 @@ static func _advance_overheat(state: Dictionary, events: Array) -> void:
 static func _advance_request_patience(
 	state: Dictionary,
 	round_definition: Dictionary,
-	catalog: Dictionary,
+	_catalog: Dictionary,
 	events: Array
 ) -> void:
-	var withdrawn_indices: Array[int] = []
-	for request_index: int in range(state["active_requests"].size()):
-		var request: Dictionary = state["active_requests"][request_index]
+	var withdrawn_requests: Array = []
+	var surviving_requests: Array = []
+	for request_value: Variant in state["active_requests"]:
+		var request: Dictionary = request_value
 		request["remaining_patience_ticks"] = int(request.get("remaining_patience_ticks", 0)) - 1
 		if int(request["remaining_patience_ticks"]) <= 0:
-			withdrawn_indices.append(request_index)
-	withdrawn_indices.reverse()
-	for request_index: int in withdrawn_indices:
-		var withdrawn: Dictionary = state["active_requests"][request_index]
-		state["active_requests"].remove_at(request_index)
+			withdrawn_requests.append(request)
+		else:
+			surviving_requests.append(request)
+	state["active_requests"] = surviving_requests
+	withdrawn_requests.sort_custom(_request_activation_precedes)
+	for withdrawn_value: Variant in withdrawn_requests:
+		var withdrawn: Dictionary = withdrawn_value
 		state["withdrawal_count"] = int(state.get("withdrawal_count", 0)) + 1
 		events.append({
 			"type": "request_withdrawn",
 			"event_id": withdrawn.get("event_id", ""),
 			"tick": int(state.get("tick", 0)),
 		})
-		_activate_waiting_request(state, events)
+	_fill_active_request_slots(state, round_definition, events)
 
 static func _release_due_requests(
 	state: Dictionary,
@@ -472,10 +537,11 @@ static func _release_due_requests(
 			"required_level": int(request_definition.get("required_level", 0)),
 			"score": int(request_definition.get("score", 0)),
 			"patience_ticks": int(request_definition.get("patience_ticks", 0)),
-			"remaining_patience_ticks": int(request_definition.get("patience_ticks", 0)),
-			"release_tick": int(event_definition.get("release_tick", 0)),
-			"activated_tick": -1,
-		}
+				"remaining_patience_ticks": int(request_definition.get("patience_ticks", 0)),
+				"release_tick": int(event_definition.get("release_tick", 0)),
+				"activated_tick": -1,
+				"urgent_emitted": false,
+			}
 		if state["active_requests"].size() < int(round_definition.get("active_request_slots", 0)):
 			_activate_request(state, request_instance, events)
 		else:
@@ -489,6 +555,7 @@ static func _release_due_requests(
 static func _activate_request(state: Dictionary, request: Dictionary, events: Array) -> void:
 	request["activated_tick"] = int(state.get("tick", 0))
 	request["remaining_patience_ticks"] = int(request.get("patience_ticks", 0))
+	request["urgent_emitted"] = bool(request.get("urgent_emitted", false))
 	state["active_requests"].append(request)
 	events.append({
 		"type": "request_activated",
@@ -497,11 +564,92 @@ static func _activate_request(state: Dictionary, request: Dictionary, events: Ar
 		"tick": int(state.get("tick", 0)),
 	})
 
-static func _activate_waiting_request(state: Dictionary, events: Array) -> void:
-	if state["waiting_requests"].is_empty():
-		return
-	var request: Dictionary = state["waiting_requests"].pop_front()
-	_activate_request(state, request, events)
+static func _fill_active_request_slots(
+	state: Dictionary,
+	round_definition: Dictionary,
+	events: Array
+) -> void:
+	var active_limit := int(round_definition.get("active_request_slots", 0))
+	while state["active_requests"].size() < active_limit and not state["waiting_requests"].is_empty():
+		var request: Dictionary = state["waiting_requests"].pop_front()
+		_activate_request(state, request, events)
+
+static func _emit_threshold_events(state: Dictionary, catalog: Dictionary, events: Array) -> void:
+	var rules: Dictionary = catalog.get("rules", {}) if catalog.get("rules", {}) is Dictionary else {}
+	var overheat_threshold := int(rules.get("overheat_danger_ticks", 0))
+	var facility_ids: Array = state.get("facilities", {}).keys()
+	facility_ids.sort()
+	for facility_id_value: Variant in facility_ids:
+		var facility: Dictionary = state["facilities"][facility_id_value]
+		var remaining := int(facility.get("overheat_remaining_ticks", 0))
+		if (
+			overheat_threshold > 0
+			and remaining > 0
+			and remaining <= overheat_threshold
+			and not bool(facility.get("overheat_danger_emitted", false))
+		):
+			facility["overheat_danger_emitted"] = true
+			events.append({
+				"type": "overheat_danger_entered",
+				"facility_id": str(facility_id_value),
+				"remaining_ticks": remaining,
+				"tick": int(state.get("tick", 0)),
+			})
+
+	var request_threshold := int(rules.get("request_urgent_ticks", 0))
+	var ordered_requests: Array = state.get("active_requests", []).duplicate()
+	ordered_requests.sort_custom(_request_activation_precedes)
+	for request_value: Variant in ordered_requests:
+		var request: Dictionary = request_value
+		var remaining := int(request.get("remaining_patience_ticks", 0))
+		if (
+			request_threshold > 0
+			and remaining > 0
+			and remaining <= request_threshold
+			and not bool(request.get("urgent_emitted", false))
+		):
+			request["urgent_emitted"] = true
+			events.append({
+				"type": "request_urgent_entered",
+				"event_id": str(request.get("event_id", "")),
+				"remaining_ticks": remaining,
+				"tick": int(state.get("tick", 0)),
+			})
+
+	var threshold_flags: Dictionary = (
+		state.get("threshold_flags", {}) if state.get("threshold_flags", {}) is Dictionary else {}
+	)
+	state["threshold_flags"] = threshold_flags
+	var remaining_deadline := maxi(
+		0,
+		int(state.get("deadline_ticks", 0)) - int(state.get("tick", 0)) - 1
+	)
+	var deadline_warning := int(rules.get("deadline_warning_ticks", 0))
+	if (
+		deadline_warning > 0
+		and remaining_deadline > 0
+		and remaining_deadline <= deadline_warning
+		and not bool(threshold_flags.get("deadline_warning_emitted", false))
+	):
+		threshold_flags["deadline_warning_emitted"] = true
+		events.append({
+			"type": "deadline_warning_entered",
+			"remaining_ticks": remaining_deadline,
+			"tick": int(state.get("tick", 0)),
+		})
+	var deadline_countdown := int(rules.get("deadline_countdown_ticks", 0))
+	if (
+		deadline_countdown > 0
+		and remaining_deadline > 0
+		and remaining_deadline <= deadline_countdown
+		and not bool(threshold_flags.get("deadline_countdown_emitted", false))
+	):
+		threshold_flags["deadline_countdown_emitted"] = true
+		events.append({
+			"type": "deadline_countdown_entered",
+			"remaining_ticks": remaining_deadline,
+			"tick": int(state.get("tick", 0)),
+		})
 
 static func _matching_recipes_for_inputs(
 	catalog: Dictionary,
@@ -568,12 +716,20 @@ static func _clear_facility_output(facility: Dictionary) -> void:
 	facility["worker_id"] = ""
 	facility["output"] = null
 	facility["overheat_remaining_ticks"] = 0
+	facility["overheat_danger_emitted"] = false
 
 static func _request_precedes(left: Dictionary, right: Dictionary) -> bool:
 	if int(left.get("score", 0)) != int(right.get("score", 0)):
 		return int(left.get("score", 0)) > int(right.get("score", 0))
 	if int(left.get("activated_tick", 0)) != int(right.get("activated_tick", 0)):
 		return int(left.get("activated_tick", 0)) < int(right.get("activated_tick", 0))
+	return str(left.get("event_id", "")) < str(right.get("event_id", ""))
+
+static func _request_activation_precedes(left: Dictionary, right: Dictionary) -> bool:
+	if int(left.get("activated_tick", -1)) != int(right.get("activated_tick", -1)):
+		return int(left.get("activated_tick", -1)) < int(right.get("activated_tick", -1))
+	if int(left.get("release_tick", -1)) != int(right.get("release_tick", -1)):
+		return int(left.get("release_tick", -1)) < int(right.get("release_tick", -1))
 	return str(left.get("event_id", "")) < str(right.get("event_id", ""))
 
 static func _find_by_id(entries: Array, id: String) -> Dictionary:

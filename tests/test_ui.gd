@@ -3,6 +3,10 @@ extends RefCounted
 const MainScript = preload("res://src/ui/main.gd")
 
 static func run(test: TestFramework) -> void:
+	test.assert_false(
+		bool(ProjectSettings.get_setting("application/config/quit_on_go_back", true)),
+		"Android Back must reach the app router before any quit decision"
+	)
 	var app: Control = MainScript.new()
 	app._build_shell()
 	app._show_legal_document("오픈소스 라이선스", {
@@ -38,5 +42,21 @@ static func run(test: TestFramework) -> void:
 			TextServer.AUTOWRAP_WORD_SMART,
 			"legal text must wrap long lines on mobile"
 		)
+	for required_button: String in [
+		"CopySupportEmailButton",
+		"OpenSupportEmailButton",
+		"CopyPublicUrlButton",
+		"OpenPublicUrlButton",
+	]:
+		test.assert_true(
+			app.find_child(required_button, true, false) != null,
+			"legal screen must expose %s" % required_button
+		)
+	app._copy_text("https://example.invalid/", "복사 완료")
+	test.assert_equal(
+		(app.find_child("LegalNoticeLabel", true, false) as Label).text,
+		"복사 완료",
+		"legal copy fallback must provide visible inline feedback"
+	)
 
 	app.free()

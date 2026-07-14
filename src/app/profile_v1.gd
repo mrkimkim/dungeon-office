@@ -61,14 +61,48 @@ static func validate(profile: Variant, round_ids: Array[String]) -> Array[String
 					errors.append("profile round %s.%s must be a non-negative integer" % [round_id, field])
 			if int(record.get("best_stars", 0)) > 3:
 				errors.append("profile round %s.best_stars cannot exceed 3" % round_id)
+			for flag: String in ["unlocked", "first_cleared"]:
+				if not record.get(flag) is bool:
+					errors.append("profile round %s.%s must be a boolean" % [round_id, flag])
+	for flag: String in [
+		"enhancement_capability_owned",
+		"client_contract_completed",
+		"mvp_completed",
+	]:
+		if not profile.get(flag) is bool:
+			errors.append("profile.%s must be a boolean" % flag)
 	if not _is_positive_integer(profile.get("next_run_sequence")):
 		errors.append("profile.next_run_sequence must be a positive integer")
 	if not profile.get("applied_result_ids") is Array:
 		errors.append("profile.applied_result_ids must be an array")
+	else:
+		var seen_result_ids: Dictionary = {}
+		var max_applied_sequence := 0
+		for result_id_value: Variant in profile["applied_result_ids"]:
+			var result_id := str(result_id_value)
+			var sequence := parse_run_sequence(result_id)
+			if sequence < 1:
+				errors.append("profile.applied_result_ids contains an invalid run ID")
+				continue
+			if seen_result_ids.has(result_id):
+				errors.append("profile.applied_result_ids contains a duplicate")
+			seen_result_ids[result_id] = true
+			max_applied_sequence = maxi(max_applied_sequence, sequence)
+		if _is_positive_integer(profile.get("next_run_sequence")):
+			if int(profile.get("next_run_sequence")) <= max_applied_sequence:
+				errors.append("profile.next_run_sequence must exceed applied result IDs")
 	if not profile.get("tutorial_flags") is Dictionary:
 		errors.append("profile.tutorial_flags must be an object")
 	if not profile.get("settings") is Dictionary:
 		errors.append("profile.settings must be an object")
+	else:
+		var settings: Dictionary = profile["settings"]
+		for volume: String in ["music_volume", "sfx_volume"]:
+			if not _is_integer_number(settings.get(volume)) or int(settings.get(volume, -1)) not in range(0, 101):
+				errors.append("profile.settings.%s must be an integer from 0 to 100" % volume)
+		for flag: String in ["haptics_enabled", "color_assist_enabled", "large_text_enabled"]:
+			if not settings.get(flag) is bool:
+				errors.append("profile.settings.%s must be a boolean" % flag)
 	return errors
 
 static func allocate_run(profile: Dictionary) -> Dictionary:
@@ -76,6 +110,30 @@ static func allocate_run(profile: Dictionary) -> Dictionary:
 	var sequence := int(updated.get("next_run_sequence", 1))
 	updated["next_run_sequence"] = sequence + 1
 	return {"profile": updated, "run_id": "run:%08d" % sequence}
+
+
+static func reconcile_next_run_sequence(profile: Dictionary, active_run_id: String) -> Dictionary:
+	var active_sequence := parse_run_sequence(active_run_id)
+	if active_sequence < 1:
+		return {"ok": false, "reason": "invalid_run_id", "profile": profile}
+	var updated: Dictionary = profile.duplicate(true)
+	var required_next := active_sequence + 1
+	var changed := int(updated.get("next_run_sequence", 1)) < required_next
+	if changed:
+		updated["next_run_sequence"] = required_next
+	return {"ok": true, "changed": changed, "profile": updated}
+
+
+static func parse_run_sequence(run_id: String) -> int:
+	if not run_id.begins_with("run:") or run_id.length() != 12:
+		return -1
+	var sequence_text := run_id.trim_prefix("run:")
+	if not sequence_text.is_valid_int():
+		return -1
+	var sequence := sequence_text.to_int()
+	if sequence < 1 or run_id != "run:%08d" % sequence:
+		return -1
+	return sequence
 
 static func can_enter(profile: Dictionary, round_id: String, round_definition: Dictionary) -> Dictionary:
 	if not profile.get("rounds", {}).has(round_id):
@@ -94,7 +152,7 @@ static func apply_settlement(
 ) -> Dictionary:
 	var result_id := str(settlement.get("result_id", ""))
 	var round_id := str(settlement.get("round_id", ""))
-	if result_id.is_empty() or round_id not in round_ids:
+	if parse_run_sequence(result_id) < 1 or round_id not in round_ids:
 		return {"ok": false, "reason": "invalid_settlement", "profile": profile}
 	if result_id in profile.get("applied_result_ids", []):
 		return {"ok": true, "duplicate": true, "gold_awarded": 0, "profile": profile.duplicate(true)}

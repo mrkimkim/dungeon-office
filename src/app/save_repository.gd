@@ -32,6 +32,11 @@ func _init(root_path: String = "user://save") -> void:
 func save_profile(profile: Dictionary) -> Dictionary:
 	return _atomic_write(PROFILE_FILE, profile)
 
+func save_recovered_profile(profile: Dictionary) -> Dictionary:
+	# A recovered .bak is the last known-good copy. Do not rotate a corrupt primary
+	# over it while installing the reconciled profile.
+	return _atomic_write(PROFILE_FILE, profile, true)
+
 func load_profile(round_ids: Array[String]) -> Dictionary:
 	var primary := _read_payload(_path(PROFILE_FILE))
 	if bool(primary.get("ok", false)):
@@ -85,10 +90,18 @@ func load_snapshot(expected_sim_version: int, expected_data_version: int) -> Dic
 			}
 	if not FileAccess.file_exists(_path(SNAPSHOT_FILE)) and not FileAccess.file_exists(_path(SNAPSHOT_FILE) + ".bak"):
 		return {"status": "missing", "value": {}, "errors": []}
+	var combined_errors: Array[String] = [
+		str(primary.get("error", "snapshot corrupt")),
+		str(backup.get("error", "backup corrupt")),
+	]
+	var incompatible := false
+	for error: String in combined_errors:
+		if "version mismatch" in error or "unsupported snapshot save_version" in error:
+			incompatible = true
 	return {
-		"status": "corrupt",
+		"status": "incompatible" if incompatible else "corrupt",
 		"value": {},
-		"errors": [str(primary.get("error", "snapshot corrupt")), str(backup.get("error", "backup corrupt"))],
+		"errors": combined_errors,
 	}
 
 func delete_snapshot() -> Dictionary:
@@ -101,7 +114,23 @@ func delete_snapshot() -> Dictionary:
 				errors.append("cannot remove %s (error %d)" % [path, remove_error])
 	return {"ok": errors.is_empty(), "errors": errors}
 
-func _atomic_write(file_name: String, payload: Dictionary) -> Dictionary:
+func delete_all() -> Dictionary:
+	var errors: Array[String] = []
+	for file_name: String in [PROFILE_FILE, SNAPSHOT_FILE]:
+		for suffix: String in ["", ".tmp", ".bak"]:
+			var path := _path(file_name) + suffix
+			if not FileAccess.file_exists(path):
+				continue
+			var remove_error := DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+			if remove_error != OK:
+				errors.append("cannot remove %s (error %d)" % [path, remove_error])
+	return {"ok": errors.is_empty(), "errors": errors}
+
+func _atomic_write(
+	file_name: String,
+	payload: Dictionary,
+	preserve_existing_backup: bool = false
+) -> Dictionary:
 	var path := _path(file_name)
 	var temporary_path := path + ".tmp"
 	var backup_path := path + ".bak"
@@ -123,17 +152,26 @@ func _atomic_write(file_name: String, payload: Dictionary) -> Dictionary:
 	var absolute_path := ProjectSettings.globalize_path(path)
 	var absolute_temporary := ProjectSettings.globalize_path(temporary_path)
 	var absolute_backup := ProjectSettings.globalize_path(backup_path)
-	if FileAccess.file_exists(backup_path):
-		var remove_backup_error := DirAccess.remove_absolute(absolute_backup)
-		if remove_backup_error != OK:
-			return {"ok": false, "error": "cannot rotate save backup (error %d)" % remove_backup_error}
-	if FileAccess.file_exists(path):
-		var backup_error := DirAccess.rename_absolute(absolute_path, absolute_backup)
-		if backup_error != OK:
-			return {"ok": false, "error": "cannot create save backup (error %d)" % backup_error}
+	if preserve_existing_backup:
+		if FileAccess.file_exists(path):
+			var remove_invalid_primary_error := DirAccess.remove_absolute(absolute_path)
+			if remove_invalid_primary_error != OK:
+				return {
+					"ok": false,
+					"error": "cannot replace recovered primary (error %d)" % remove_invalid_primary_error,
+				}
+	else:
+		if FileAccess.file_exists(backup_path):
+			var remove_backup_error := DirAccess.remove_absolute(absolute_backup)
+			if remove_backup_error != OK:
+				return {"ok": false, "error": "cannot rotate save backup (error %d)" % remove_backup_error}
+		if FileAccess.file_exists(path):
+			var backup_error := DirAccess.rename_absolute(absolute_path, absolute_backup)
+			if backup_error != OK:
+				return {"ok": false, "error": "cannot create save backup (error %d)" % backup_error}
 	var install_error := DirAccess.rename_absolute(absolute_temporary, absolute_path)
 	if install_error != OK:
-		if FileAccess.file_exists(backup_path) and not FileAccess.file_exists(path):
+		if not preserve_existing_backup and FileAccess.file_exists(backup_path) and not FileAccess.file_exists(path):
 			DirAccess.rename_absolute(absolute_backup, absolute_path)
 		return {"ok": false, "error": "cannot install save (error %d)" % install_error}
 	return {"ok": true}
@@ -173,6 +211,8 @@ func _validate_snapshot(snapshot: Variant, expected_sim_version: int, expected_d
 		errors.append("snapshot data_version mismatch")
 	if str(snapshot.get("run_id", "")).is_empty():
 		errors.append("snapshot.run_id must not be empty")
+	elif Profile.parse_run_sequence(str(snapshot.get("run_id", ""))) < 1:
+		errors.append("snapshot.run_id must match run:########")
 	if not snapshot.get("round_state") is Dictionary:
 		errors.append("snapshot.round_state must be an object")
 	return errors
