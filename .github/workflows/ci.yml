@@ -19,6 +19,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install CI dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ripgrep
+          rg --version
+
       - name: Install Godot 4.7-stable
         shell: bash
         run: |
