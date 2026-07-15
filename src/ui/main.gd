@@ -9,6 +9,7 @@ const RoundSimulatorScript = preload("res://src/sim/round_simulator.gd")
 const SimContractScript = preload("res://src/sim/sim_contract.gd")
 const PlayScreenScript = preload("res://src/ui/play_screen.gd")
 const RecipeGuideScript = preload("res://src/ui/recipe_guide.gd")
+const VisualCatalogScript = preload("res://src/ui/visual_catalog.gd")
 const TitleForgeTexture = preload("res://art/mvp/runtime/backgrounds/bg_title_forge.png")
 
 const AUTOSAVE_INTERVAL_SECONDS: float = 5.0
@@ -276,28 +277,93 @@ func _show_title() -> void:
 	set_process(false)
 	_screen = "title"
 	_clear_content()
-	_add_spacer(54)
-	_add_heading("던전 오피스")
-	_add_label("작은 대장간에서 원정대의 무기를 준비하세요", 16, HORIZONTAL_ALIGNMENT_CENTER)
+	_add_spacer(28)
+	var title_label := _add_heading("던전 오피스")
+	title_label.add_theme_font_size_override("font_size", _scaled_font_size(30))
+	title_label.add_theme_constant_override("outline_size", 5)
+	title_label.add_theme_color_override("font_outline_color", Color(0.10, 0.06, 0.04, 0.92))
+	var subtitle := _add_label(
+		"작은 대장간에서 원정대의 무기를 준비하세요",
+		14,
+		HORIZONTAL_ALIGNMENT_CENTER
+	)
+	subtitle.add_theme_constant_override("outline_size", 3)
+	subtitle.add_theme_color_override("font_outline_color", Color(0.10, 0.06, 0.04, 0.9))
 	_add_pending_notice()
+	_add_flexible_spacer()
+
+	var action_sheet := _make_semantic_panel("title_sheet")
+	action_sheet.name = "TitleActionSheet"
+	action_sheet.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_content.add_child(action_sheet)
+	var sheet_body := VBoxContainer.new()
+	sheet_body.add_theme_constant_override("separation", 7)
+	action_sheet.add_child(sheet_body)
 	if _profile.is_empty():
-		_add_panel_text("저장된 진행이 없습니다. 첫 거래처의 다섯 라운드를 시작합니다.")
-		_add_button("새로 시작", _new_game)
+		_add_label_to(
+			sheet_body,
+			"첫 거래처 · 다섯 라운드",
+			12,
+			Color("e7c88e"),
+			HORIZONTAL_ALIGNMENT_CENTER
+		)
+		var start_button := _make_button("새로 시작", _new_game, true)
+		start_button.name = "NewGameButton"
+		sheet_body.add_child(start_button)
 	else:
-		_add_panel_text(_profile_summary())
+		_add_label_to(
+			sheet_body,
+			_profile_summary(),
+			12,
+			Color("e7c88e"),
+			HORIZONTAL_ALIGNMENT_CENTER
+		)
 		if _has_valid_snapshot():
 			var snapshot: Dictionary = _snapshot_result.get("value", {})
 			var state: Dictionary = snapshot.get("round_state", {})
-			_add_button("%s 이어하기" % str(state.get("round_id", "진행 중 판")), _continue_game)
-			_add_button("지도에서 보기", _show_map, false)
+			var continue_button := _make_button(
+				"%s 이어하기" % str(state.get("round_id", "진행 중 판")),
+				_continue_game,
+				true
+			)
+			continue_button.name = "ContinueRoundButton"
+			sheet_body.add_child(continue_button)
+			var map_button := _make_button("지도에서 보기", _show_map, false)
+			_apply_button_role(map_button, "ghost")
+			sheet_body.add_child(map_button)
 		else:
-			_add_button("계속", _show_map)
+			var continue_button := _make_button("계속", _show_map, true)
+			continue_button.name = "ContinueButton"
+			sheet_body.add_child(continue_button)
 		if str(_snapshot_result.get("status", "missing")) in ["corrupt", "incompatible"]:
-			_add_button("손상된 진행 중 판 폐기", _discard_broken_snapshot, false)
-	_add_spacer()
-	_add_button("설정", func() -> void: _show_settings("title"), false)
-	_add_label("오프라인 · 광고/분석/결제/네트워크 권한 없음", 12, HORIZONTAL_ALIGNMENT_CENTER)
-	_add_label("테스트 빌드 %s" % _app_version(), 12, HORIZONTAL_ALIGNMENT_CENTER)
+			var discard_button := _make_button(
+				"손상된 진행 중 판 폐기",
+				_discard_broken_snapshot,
+				false
+			)
+			_apply_button_role(discard_button, "danger")
+			sheet_body.add_child(discard_button)
+	var utility_row := HBoxContainer.new()
+	utility_row.add_theme_constant_override("separation", 6)
+	sheet_body.add_child(utility_row)
+	var settings_button := _make_button(
+		"설정",
+		func() -> void: _show_settings("title"),
+		false
+	)
+	settings_button.name = "TitleSettingsButton"
+	settings_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_apply_button_role(settings_button, "ghost")
+	utility_row.add_child(settings_button)
+	var build_label := _add_label_to(
+		utility_row,
+		"오프라인 · v%s" % _app_version(),
+		10,
+		Color("b9aa95"),
+		HORIZONTAL_ALIGNMENT_RIGHT
+	)
+	build_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	build_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 
 
 func _new_game() -> void:
@@ -354,35 +420,120 @@ func _show_map() -> void:
 	set_process(false)
 	_screen = "map"
 	_clear_content()
-	_add_heading("새싹 원정대")
-	_add_panel_text(_profile_summary())
+	var header_row := HBoxContainer.new()
+	header_row.add_theme_constant_override("separation", 8)
+	header_row.custom_minimum_size = Vector2(0, 44)
+	_content.add_child(header_row)
+	var contract_mark := _make_round_badge("새싹", Color("7fb36b"))
+	header_row.add_child(contract_mark)
+	var header_text := VBoxContainer.new()
+	header_text.add_theme_constant_override("separation", 0)
+	header_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header_row.add_child(header_text)
+	_add_label_to(header_text, "새싹 원정대", 20, Color("fff0d0"))
+	_add_label_to(header_text, "첫 번째 제작 계약", 11, Color("b9aa95"))
+
+	var summary_panel := _make_semantic_panel("hud")
+	summary_panel.name = "MapSummaryPanel"
+	summary_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_content.add_child(summary_panel)
+	_add_label_to(
+		summary_panel,
+		_profile_summary(),
+		12,
+		Color("e7c88e"),
+		HORIZONTAL_ALIGNMENT_CENTER
+	)
 	_add_pending_notice()
 	if _has_valid_snapshot():
 		var snapshot_state: Dictionary = _snapshot_result.get("value", {}).get("round_state", {})
-		_add_panel_text("⏸ %s 라운드가 일시정지되어 있습니다." % snapshot_state.get("round_id", "?"), Color("ffcf78"))
-		_add_button("중단 라운드 이어하기", _continue_game)
-		_add_button("중단 라운드 포기", _confirm_abandon_snapshot, false)
+		var resume_panel := _make_semantic_panel("notice")
+		resume_panel.name = "PausedRoundCard"
+		resume_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_content.add_child(resume_panel)
+		var resume_box := VBoxContainer.new()
+		resume_box.add_theme_constant_override("separation", 4)
+		resume_panel.add_child(resume_box)
+		_add_label_to(
+			resume_box,
+			"일시정지된 %s 라운드" % snapshot_state.get("round_id", "?"),
+			12,
+			Color("ffcf78"),
+			HORIZONTAL_ALIGNMENT_CENTER
+		)
+		var resume_row := HBoxContainer.new()
+		resume_row.add_theme_constant_override("separation", 6)
+		resume_box.add_child(resume_row)
+		var resume_button := _make_button("이어하기", _continue_game, true)
+		resume_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		resume_row.add_child(resume_button)
+		var abandon_button := _make_button("포기", _confirm_abandon_snapshot, false)
+		abandon_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_apply_button_role(abandon_button, "danger")
+		resume_row.add_child(abandon_button)
 
+	var route_panel := _make_semantic_panel("route")
+	route_panel.name = "RoundRoutePanel"
+	route_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	route_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_content.add_child(route_panel)
+	var route := VBoxContainer.new()
+	route.name = "RoundRoute"
+	route.add_theme_constant_override("separation", 2)
+	route.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	route_panel.add_child(route)
+	var round_index := 0
 	for round_id: String in _data_repository.get_round_ids():
 		var definition := _data_repository.get_round(round_id)
 		var record: Dictionary = _profile.get("rounds", {}).get(round_id, {})
 		var access := ProfileScript.can_enter(_profile, round_id, definition)
-		var label := "%s · %s" % [round_id, definition.get("display_name", "")]
+		var label := "%s   %s" % [round_id, definition.get("display_name", "")]
+		var button_role := "round_available"
 		if bool(record.get("first_cleared", false)):
-			label += "  %s" % _star_text(int(record.get("best_stars", 0)))
+			label += "   %s" % _star_text(int(record.get("best_stars", 0)))
+			button_role = "round_complete"
 		elif not bool(record.get("unlocked", false)):
-			label += "  🔒"
+			label += "   잠김"
+			button_role = "round_locked"
 		elif str(access.get("reason", "")) == "missing_capability":
-			label += "  🛠 설비 필요"
+			label += "   설비 필요"
+			button_role = "round_locked"
 		var callback := Callable(self, "_open_round").bind(round_id)
-		var button := _add_button(label, callback, false)
+		var node_row := HBoxContainer.new()
+		node_row.add_theme_constant_override("separation", 4)
+		route.add_child(node_row)
+		if round_index % 2 == 1:
+			var lead_spacer := Control.new()
+			lead_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			node_row.add_child(lead_spacer)
+		var button := _make_button(label, callback, false)
 		button.name = "RoundButton_%s" % round_id
+		button.custom_minimum_size = Vector2(224, 48)
+		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		button.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		_apply_button_role(button, button_role)
 		button.disabled = _has_valid_snapshot()
+		node_row.add_child(button)
+		if round_index % 2 == 0:
+			var tail_spacer := Control.new()
+			tail_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			node_row.add_child(tail_spacer)
+		if round_index < _data_repository.get_round_ids().size() - 1:
+			_add_route_connector(route, round_index % 2 == 0)
+		round_index += 1
 
+	var navigation_row := _add_button_row()
 	if _can_offer_enhancement_purchase() or bool(_profile.get("enhancement_capability_owned", false)):
-		_add_button("강화 설비 상점", _show_shop, false)
-	_add_button("설정", func() -> void: _show_settings("map"), false)
-	_add_button("타이틀", _show_title, false)
+		var shop_button := _add_button_to(navigation_row, "설비 상점", _show_shop)
+		_apply_button_role(shop_button, "secondary")
+	var settings_button := _add_button_to(
+		navigation_row,
+		"설정",
+		func() -> void: _show_settings("map")
+	)
+	_apply_button_role(settings_button, "ghost")
+	var title_button := _add_button_to(navigation_row, "타이틀", _show_title)
+	_apply_button_role(title_button, "ghost")
 
 
 func _open_round(round_id: String) -> void:
@@ -408,19 +559,85 @@ func _show_brief(round_id: String) -> void:
 	_screen = "brief"
 	_round_definition = _data_repository.get_round(round_id)
 	_clear_content()
-	_add_heading("%s · %s" % [round_id, _round_definition.get("display_name", "")])
+	var eyebrow := _add_label("새싹 원정대 · 제작 의뢰서", 11, HORIZONTAL_ALIGNMENT_CENTER)
+	eyebrow.modulate = Color("b9aa95")
+	var brief_card := _make_semantic_panel("paper")
+	brief_card.name = "RoundBriefCard"
+	brief_card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_content.add_child(brief_card)
+	var brief_body := VBoxContainer.new()
+	brief_body.add_theme_constant_override("separation", 8)
+	brief_card.add_child(brief_body)
+	var brief_title := _add_label_to(
+		brief_body,
+		"%s · %s" % [round_id, _round_definition.get("display_name", "")],
+		22,
+		Color("3b2922"),
+		HORIZONTAL_ALIGNMENT_CENTER
+	)
+	brief_title.add_theme_constant_override("outline_size", 0)
 	var tick_rate := int(_data_repository.catalog.get("rules", {}).get("tick_rate", 20))
 	var deadline_seconds := int(_round_definition.get("deadline_ticks", 0)) / maxi(1, tick_rate)
-	_add_panel_text("납품 기한 %d초\n%s" % [deadline_seconds, ROUND_LEARNING.get(round_id, "")])
+	var deadline_label := _add_label_to(
+		brief_body,
+		"납품 기한  %d초" % deadline_seconds,
+		14,
+		Color("9a4f2f"),
+		HORIZONTAL_ALIGNMENT_CENTER
+	)
+	deadline_label.add_theme_constant_override("outline_size", 0)
+	var divider := ColorRect.new()
+	divider.color = Color("9a704b")
+	divider.custom_minimum_size = Vector2(0, 1)
+	divider.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	brief_body.add_child(divider)
+	var learning_label := _add_label_to(
+		brief_body,
+		str(ROUND_LEARNING.get(round_id, "")),
+		14,
+		Color("45352d"),
+		HORIZONTAL_ALIGNMENT_CENTER
+	)
+	learning_label.add_theme_constant_override("outline_size", 0)
 	if round_id == "R4":
-		_add_panel_text("예고: 종반에 고가 철검 +0 의뢰가 옵니다. 철검을 미리 완성해 두세요.", Color("d9c2ff"))
+		var forecast := _add_label_to(
+			brief_body,
+			"예고 · 종반 고가 철검 의뢰\n철검을 미리 완성해 두세요.",
+			12,
+			Color("6c3e70"),
+			HORIZONTAL_ALIGNMENT_CENTER
+		)
+		forecast.add_theme_constant_override("outline_size", 0)
 	elif round_id == "R5":
-		_add_panel_text("예고: 중반 단검 +1, 종반 고가 철검 +1 의뢰가 옵니다. 장비와 강화석을 미리 준비하세요. 강화는 항상 성공합니다.", Color("d9c2ff"))
-	_add_label("시설: %s" % _facility_names(_round_definition.get("facilities", [])), 13)
-	_add_label("별 기준: %s" % _cutline_text(_round_definition.get("cutlines", [])), 13)
-	_add_spacer()
-	_add_button("라운드 개시", func() -> void: _start_round(round_id))
-	_add_button("지도로", _show_map, false)
+		var forecast := _add_label_to(
+			brief_body,
+			"예고 · 단검 +1 / 고가 철검 +1\n장비와 강화석을 미리 준비하세요.",
+			12,
+			Color("6c3e70"),
+			HORIZONTAL_ALIGNMENT_CENTER
+		)
+		forecast.add_theme_constant_override("outline_size", 0)
+	var facility_label := _add_label_to(
+		brief_body,
+		"사용 시설  ·  %s" % _facility_names(_round_definition.get("facilities", [])),
+		12,
+		Color("5b4639"),
+		HORIZONTAL_ALIGNMENT_CENTER
+	)
+	facility_label.add_theme_constant_override("outline_size", 0)
+	var cutline_label := _add_label_to(
+		brief_body,
+		"별 기준  ·  %s" % _cutline_text(_round_definition.get("cutlines", [])),
+		12,
+		Color("5b4639"),
+		HORIZONTAL_ALIGNMENT_CENTER
+	)
+	cutline_label.add_theme_constant_override("outline_size", 0)
+	_add_flexible_spacer()
+	var start_button := _add_button("라운드 개시", func() -> void: _start_round(round_id))
+	start_button.name = "StartRoundButton"
+	var map_button := _add_button("지도로", _show_map, false)
+	_apply_button_role(map_button, "ghost")
 
 
 func _start_round(round_id: String) -> void:
@@ -670,10 +887,41 @@ func _show_recipe_guide(item_id: String, enhancement_level: int) -> void:
 	_clear_content()
 	var target: Dictionary = guide.get("target", {})
 	var target_name := str(target.get("display_name", item_id))
-	var heading := _add_heading("%s 제작법" % target_name)
+	var recipe_header := _make_semantic_panel("recipe_header")
+	recipe_header.name = "RecipeHeader"
+	recipe_header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_content.add_child(recipe_header)
+	var header_row := HBoxContainer.new()
+	header_row.add_theme_constant_override("separation", 10)
+	recipe_header.add_child(header_row)
+	var target_icon := _make_visual_icon(
+		VisualCatalogScript.item_texture(item_id),
+		56,
+		1.0
+	)
+	if target_icon != null:
+		target_icon.name = "RecipeTargetIcon"
+		header_row.add_child(target_icon)
+	var heading_box := VBoxContainer.new()
+	heading_box.add_theme_constant_override("separation", 2)
+	heading_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header_row.add_child(heading_box)
+	var heading := _add_label_to(
+		heading_box,
+		"%s 제작법" % target_name,
+		24,
+		Color("fff0d0")
+	)
 	heading.name = "RecipeTitleLabel"
-	var pause_notice := _add_panel_text("제작법을 보는 동안 라운드는 일시정지됩니다.", Color("9fdcc8"))
+	_add_label_to(heading_box, "원자재부터 완성품까지", 11, Color("b9aa95"))
+	var pause_notice := _add_panel_text(
+		"제작법을 보는 동안 라운드는 일시정지됩니다.",
+		Color("9fdcc8")
+	)
 	pause_notice.name = "RecipePauseNotice"
+	var pause_panel := pause_notice.get_parent() as PanelContainer
+	if pause_panel != null:
+		_apply_panel_role(pause_panel, "notice")
 
 	var scroll := ScrollContainer.new()
 	scroll.name = "RecipeScroll"
@@ -696,15 +944,24 @@ func _show_recipe_guide(item_id: String, enhancement_level: int) -> void:
 		)
 		empty_label.name = "RecipeEmptyLabel"
 	else:
-		var raw_texts: Array[String] = []
-		for amount_value: Variant in guide.get("raw_materials", []):
-			raw_texts.append(_recipe_amount_text(amount_value))
-		var raw_panel := _add_recipe_panel(
-			body,
-			"필요 원자재\n%s" % " · ".join(raw_texts),
-			Color("f0bf6a")
-		)
+		var raw_panel := _make_semantic_panel("recipe_step")
 		raw_panel.name = "RecipeRawMaterials"
+		raw_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		body.add_child(raw_panel)
+		var raw_box := VBoxContainer.new()
+		raw_box.add_theme_constant_override("separation", 5)
+		raw_panel.add_child(raw_box)
+		_add_label_to(raw_box, "필요 원자재", 13, Color("f0bf6a"))
+		var raw_materials: Array = guide.get("raw_materials", [])
+		var raw_grid := GridContainer.new()
+		raw_grid.columns = maxi(1, mini(3, raw_materials.size()))
+		raw_grid.add_theme_constant_override("h_separation", 6)
+		raw_grid.add_theme_constant_override("v_separation", 4)
+		raw_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		raw_box.add_child(raw_grid)
+		for amount_value: Variant in raw_materials:
+			if amount_value is Dictionary:
+				_add_recipe_item_chip(raw_grid, amount_value, true)
 
 		var tick_rate := maxi(
 			1,
@@ -713,9 +970,6 @@ func _show_recipe_guide(item_id: String, enhancement_level: int) -> void:
 		var step_number := 1
 		for step_value: Variant in guide.get("steps", []):
 			var step: Dictionary = step_value
-			var input_texts: Array[String] = []
-			for input_value: Variant in step.get("inputs", []):
-				input_texts.append(_recipe_amount_text(input_value))
 			var run_count := int(step.get("run_count", 1))
 			var seconds := ceili(
 				float(int(step.get("total_duration_ticks", 0))) / float(tick_rate)
@@ -728,18 +982,70 @@ func _show_recipe_guide(item_id: String, enhancement_level: int) -> void:
 				process_text += " · %d회" % run_count
 			if str(step.get("worker_mode", "")) == "one":
 				process_text += " · 일꾼 필요"
-			var step_panel := _add_recipe_panel(
-				body,
-				"%d. %s\n%s  →  %s" % [
-					step_number,
-					process_text,
-					" + ".join(input_texts),
-					_recipe_amount_text(step.get("output", {})),
-				],
-				Color("f2dfc2")
+			var connector := CenterContainer.new()
+			connector.custom_minimum_size = Vector2(0, 12)
+			body.add_child(connector)
+			_add_label_to(
+				connector,
+				"↓",
+				14,
+				Color("b47a48"),
+				HORIZONTAL_ALIGNMENT_CENTER
 			)
+			var step_panel := _make_semantic_panel("recipe_step")
 			step_panel.name = "RecipeStep_%s" % str(step.get("recipe_id", "unknown"))
+			step_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			body.add_child(step_panel)
+			var step_row := HBoxContainer.new()
+			step_row.add_theme_constant_override("separation", 8)
+			step_panel.add_child(step_row)
+			var facility_icon := _make_visual_icon(
+				VisualCatalogScript.facility_texture(str(step.get("facility_id", ""))),
+				54,
+				0.96
+			)
+			if facility_icon != null:
+				facility_icon.name = "RecipeFacilityIcon_%s" % str(step.get("recipe_id", "unknown"))
+				step_row.add_child(facility_icon)
+			var step_box := VBoxContainer.new()
+			step_box.add_theme_constant_override("separation", 4)
+			step_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			step_row.add_child(step_box)
+			_add_label_to(
+				step_box,
+				"%d단계 · %s" % [step_number, process_text],
+				12,
+				Color("fff0d0")
+			)
+			var item_flow := HBoxContainer.new()
+			item_flow.add_theme_constant_override("separation", 4)
+			item_flow.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			step_box.add_child(item_flow)
+			var inputs: Array = step.get("inputs", [])
+			for input_index: int in range(inputs.size()):
+				var input_value: Variant = inputs[input_index]
+				if input_value is Dictionary:
+					_add_recipe_item_chip(item_flow, input_value, false)
+				if input_index < inputs.size() - 1:
+					_add_label_to(
+						item_flow,
+						"+",
+						11,
+						Color("b9aa95"),
+						HORIZONTAL_ALIGNMENT_CENTER
+					)
+			_add_label_to(
+				item_flow,
+				"→",
+				14,
+				Color("f0bf6a"),
+				HORIZONTAL_ALIGNMENT_CENTER
+			)
+			var output_value: Variant = step.get("output", {})
+			if output_value is Dictionary:
+				_add_recipe_item_chip(item_flow, output_value, false)
 			step_number += 1
+	_configure_scroll_passthrough(body)
 
 	var close_button := _add_button("게임으로 돌아가기", _resume_round)
 	close_button.name = "RecipeCloseButton"
@@ -788,18 +1094,80 @@ func _show_pause(message: String = "시간·작업·의뢰·과열이 모두 멈
 	_screen = "pause"
 	set_process(false)
 	_clear_content()
-	_add_heading("일시정지")
-	_add_panel_text(message)
+	_add_spacer(16)
+	var heading := _add_heading("일시정지")
+	heading.add_theme_font_size_override("font_size", _scaled_font_size(28))
+	_add_label("작업장은 안전하게 멈춰 있습니다", 12, HORIZONTAL_ALIGNMENT_CENTER).modulate = Color("b9aa95")
+
+	var notice_panel := _make_semantic_panel("notice")
+	notice_panel.name = "PauseNoticePanel"
+	notice_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_content.add_child(notice_panel)
+	_add_label_to(
+		notice_panel,
+		message,
+		12,
+		Color("f0c77f"),
+		HORIZONTAL_ALIGNMENT_CENTER
+	)
 	_add_pending_notice()
-	_add_label(_round_status_summary(), 14)
+
+	var status_panel := _make_semantic_panel("hud")
+	status_panel.name = "PauseStatusPanel"
+	status_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_content.add_child(status_panel)
+	var status_box := VBoxContainer.new()
+	status_box.add_theme_constant_override("separation", 8)
+	status_panel.add_child(status_box)
+	var status_header := HBoxContainer.new()
+	status_header.add_theme_constant_override("separation", 8)
+	status_box.add_child(status_header)
+	status_header.add_child(_make_round_badge(str(_round_state.get("round_id", "?")), Color("b47a48")))
+	var tick_rate := maxi(1, int(_data_repository.catalog.get("rules", {}).get("tick_rate", 20)))
+	var remaining_ticks := maxi(
+		0,
+		int(_round_state.get("deadline_ticks", 0)) - int(_round_state.get("tick", 0))
+	)
+	var status_title_box := VBoxContainer.new()
+	status_title_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	status_header.add_child(status_title_box)
+	_add_label_to(status_title_box, "남은 시간 %d초" % ceili(float(remaining_ticks) / float(tick_rate)), 16)
+	_add_label_to(status_title_box, "현재 진행은 자동 저장되었습니다", 10, Color("a99d8d"))
+
+	var stat_row := HBoxContainer.new()
+	stat_row.add_theme_constant_override("separation", 6)
+	status_box.add_child(stat_row)
+	_add_pause_stat(stat_row, "점수", str(int(_round_state.get("score", 0))))
+	_add_pause_stat(stat_row, "납품", str(_round_state.get("deliveries", []).size()))
+	_add_pause_stat(
+		stat_row,
+		"손실",
+		str(int(_round_state.get("withdrawal_count", 0)) + int(_round_state.get("overheat_loss_count", 0)))
+	)
 	if _snapshot_save_failed:
-		_add_panel_text("최근 진행 저장에 실패했습니다. 재개할 수 있지만 강제 종료 시 최근 조작이 사라질 수 있습니다.", Color("ffcf78"))
-	_add_spacer()
-	_add_button("재개", _resume_round)
-	_add_button("의뢰서 보기", _show_pause_brief, false)
-	_add_button("현재 라운드 재시작", _confirm_restart_round, false)
-	_add_button("저장 후 지도 나가기", _save_and_map, false)
-	_add_button("설정", func() -> void: _show_settings("pause"), false)
+		var save_warning := _add_panel_text(
+			"최근 진행 저장에 실패했습니다. 강제 종료 시 최근 조작이 사라질 수 있습니다.",
+			Color("ffcf78")
+		)
+		_apply_panel_role(save_warning.get_parent() as PanelContainer, "notice")
+	_add_flexible_spacer()
+
+	var resume_button := _add_button("▶  작업장으로 돌아가기", _resume_round)
+	resume_button.name = "ResumeRoundButton"
+	var utility_row := _add_button_row()
+	var brief_button := _add_button_to(utility_row, "의뢰서 보기", _show_pause_brief)
+	_apply_button_role(brief_button, "secondary")
+	var settings_button := _add_button_to(
+		utility_row,
+		"설정",
+		func() -> void: _show_settings("pause")
+	)
+	_apply_button_role(settings_button, "ghost")
+	var exit_row := _add_button_row()
+	var restart_button := _add_button_to(exit_row, "라운드 재시작", _confirm_restart_round)
+	_apply_button_role(restart_button, "danger")
+	var map_button := _add_button_to(exit_row, "저장 후 지도", _save_and_map)
+	_apply_button_role(map_button, "ghost")
 
 
 func _resume_round() -> void:
@@ -1490,34 +1858,171 @@ func _build_app_theme() -> Theme:
 	var app_theme := Theme.new()
 	app_theme.set_color("font_color", "Label", Color("fff0d0"))
 	app_theme.set_color("font_outline_color", "Label", Color(0.12, 0.08, 0.09, 0.9))
-	app_theme.set_constant("outline_size", "Label", 1)
+	app_theme.set_constant("outline_size", "Label", 0)
 	app_theme.set_color("default_color", "RichTextLabel", Color("fff0d0"))
 	app_theme.set_color("font_color", "Button", Color("fff0d0"))
 	app_theme.set_color("font_hover_color", "Button", Color.WHITE)
 	app_theme.set_color("font_pressed_color", "Button", Color("fff7e5"))
 	app_theme.set_color("font_disabled_color", "Button", Color("8d8287"))
 	app_theme.set_stylebox("normal", "Button", _ui_style_box(
-		Color("604047"), Color("a4633f"), 10, 4, Color(0.04, 0.025, 0.035, 0.72)
+		Color("342d34"), Color("705462"), 8, 2, Color(0.04, 0.025, 0.035, 0.55)
 	))
 	app_theme.set_stylebox("hover", "Button", _ui_style_box(
-		Color("72505a"), Color("f0a259"), 10, 4, Color(0.04, 0.025, 0.035, 0.76)
+		Color("40353b"), Color("d18b4f"), 8, 2, Color(0.04, 0.025, 0.035, 0.58)
 	))
 	app_theme.set_stylebox("pressed", "Button", _ui_style_box(
-		Color("4f353d"), Color("f07b43"), 10, 1, Color(0.04, 0.025, 0.035, 0.42)
+		Color("29242b"), Color("f07b43"), 8, 1, Color(0.04, 0.025, 0.035, 0.35)
 	))
 	app_theme.set_stylebox("disabled", "Button", _ui_style_box(
-		Color("302a33"), Color("514850"), 10, 2, Color(0.02, 0.02, 0.025, 0.35)
+		Color("29262d"), Color("454047"), 8, 1, Color(0.02, 0.02, 0.025, 0.28)
 	))
 	app_theme.set_stylebox("focus", "Button", _ui_style_box(
-		Color(0, 0, 0, 0), Color("63bce6"), 10, 2, Color(0, 0, 0, 0)
+		Color(0, 0, 0, 0), Color("63bce6"), 8, 2, Color(0, 0, 0, 0)
 	))
 	app_theme.set_stylebox("panel", "PanelContainer", _ui_style_box(
-		Color("2c2631"), Color("695462"), 12, 3, Color(0.025, 0.018, 0.028, 0.7)
+		Color("29252d"), Color("584b56"), 9, 2, Color(0.025, 0.018, 0.028, 0.55)
 	))
 	app_theme.set_stylebox("normal", "LineEdit", _ui_style_box(
 		Color("231f28"), Color("695462"), 8, 2, Color(0.02, 0.015, 0.02, 0.55)
 	))
 	return app_theme
+
+
+func _make_semantic_panel(role: String) -> PanelContainer:
+	var panel := PanelContainer.new()
+	_apply_panel_role(panel, role)
+	return panel
+
+
+func _apply_panel_role(panel: PanelContainer, role: String) -> void:
+	var style: StyleBoxFlat
+	match role:
+		"title_sheet":
+			style = _ui_style_box(
+				Color(0.075, 0.065, 0.085, 0.94),
+				Color("b47a48"),
+				14,
+				3,
+				Color(0.02, 0.015, 0.02, 0.72)
+			)
+		"hud":
+			style = _ui_style_box(
+				Color("25212a"), Color("6a545d"), 8, 1, Color(0.02, 0.015, 0.025, 0.4)
+			)
+		"route":
+			style = _ui_style_box(
+				Color("211e26"), Color("4f454e"), 10, 1, Color(0.02, 0.015, 0.025, 0.42)
+			)
+		"notice":
+			style = _ui_style_box(
+				Color("2d292f"), Color("b47a48"), 8, 2, Color(0.02, 0.015, 0.025, 0.48)
+			)
+		"paper":
+			style = _ui_style_box(
+				Color("d8bd88"), Color("7c5132"), 10, 3, Color(0.03, 0.018, 0.012, 0.62)
+			)
+			style.content_margin_left = 15
+			style.content_margin_right = 15
+			style.content_margin_top = 14
+			style.content_margin_bottom = 17
+		"recipe_header":
+			style = _ui_style_box(
+				Color("29232d"), Color("b47a48"), 10, 2, Color(0.02, 0.015, 0.025, 0.5)
+			)
+		"recipe_step":
+			style = _ui_style_box(
+				Color("29262f"), Color("66545f"), 9, 2, Color(0.02, 0.015, 0.025, 0.48)
+			)
+		_:
+			style = _ui_style_box(
+				Color("29252d"), Color("584b56"), 9, 2, Color(0.02, 0.015, 0.025, 0.5)
+			)
+	panel.add_theme_stylebox_override("panel", style)
+
+
+func _apply_button_role(button: Button, role: String) -> void:
+	var normal_bg := Color("342d34")
+	var hover_bg := Color("40353b")
+	var pressed_bg := Color("29242b")
+	var disabled_bg := Color("29262d")
+	var border := Color("705462")
+	var hover_border := Color("d18b4f")
+	var radius := 8
+	var depth := 2
+	var font_color := Color("fff0d0")
+	match role:
+		"primary":
+			normal_bg = Color("b85b35")
+			hover_bg = Color("cc6940")
+			pressed_bg = Color("98482e")
+			disabled_bg = Color("503b38")
+			border = Color("f3a455")
+			hover_border = Color("ffc26f")
+			radius = 11
+			depth = 5
+		"ghost":
+			normal_bg = Color(0.10, 0.085, 0.11, 0.78)
+			hover_bg = Color(0.18, 0.15, 0.18, 0.9)
+			pressed_bg = Color(0.08, 0.07, 0.09, 0.88)
+			disabled_bg = Color(0.08, 0.075, 0.09, 0.55)
+			border = Color("514650")
+			hover_border = Color("a87953")
+			depth = 1
+		"danger":
+			normal_bg = Color("493034")
+			hover_bg = Color("5b383a")
+			pressed_bg = Color("37272a")
+			disabled_bg = Color("30282b")
+			border = Color("a85d54")
+			hover_border = Color("dc7b68")
+			font_color = Color("ffd8cf")
+		"round_available":
+			normal_bg = Color("332b31")
+			hover_bg = Color("45343a")
+			pressed_bg = Color("292329")
+			disabled_bg = Color("29262d")
+			border = Color("b47a48")
+			hover_border = Color("f0a259")
+			depth = 3
+		"round_complete":
+			normal_bg = Color("29372f")
+			hover_bg = Color("32483a")
+			pressed_bg = Color("223028")
+			disabled_bg = Color("28302d")
+			border = Color("6f9f72")
+			hover_border = Color("9ed39c")
+			font_color = Color("dff1d5")
+			depth = 3
+		"round_locked":
+			normal_bg = Color("29262d")
+			hover_bg = Color("332f36")
+			pressed_bg = Color("242127")
+			disabled_bg = Color("252329")
+			border = Color("4c464d")
+			hover_border = Color("766870")
+			font_color = Color("9e9498")
+			depth = 1
+		_:
+			pass
+	button.add_theme_color_override("font_color", font_color)
+	button.add_theme_color_override("font_hover_color", Color.WHITE)
+	button.add_theme_color_override("font_pressed_color", font_color.lightened(0.08))
+	button.add_theme_color_override("font_disabled_color", Color("777078"))
+	button.add_theme_stylebox_override("normal", _ui_style_box(
+		normal_bg, border, radius, depth, Color(0.03, 0.02, 0.03, 0.55)
+	))
+	button.add_theme_stylebox_override("hover", _ui_style_box(
+		hover_bg, hover_border, radius, depth, Color(0.03, 0.02, 0.03, 0.58)
+	))
+	button.add_theme_stylebox_override("pressed", _ui_style_box(
+		pressed_bg, hover_border, radius, 1, Color(0.02, 0.015, 0.02, 0.3)
+	))
+	button.add_theme_stylebox_override("disabled", _ui_style_box(
+		disabled_bg, Color("454047"), radius, 1, Color(0.02, 0.015, 0.02, 0.25)
+	))
+	button.add_theme_stylebox_override("focus", _ui_style_box(
+		Color(0, 0, 0, 0), Color("63bce6"), radius, 2, Color(0, 0, 0, 0)
+	))
 
 
 func _ui_style_box(
@@ -1547,6 +2052,140 @@ func _ui_style_box(
 	style.shadow_offset = Vector2(0, 2 if bottom_depth > 1 else 1)
 	style.anti_aliasing = true
 	return style
+
+
+func _add_label_to(
+	parent: Node,
+	text: String,
+	size: int = 14,
+	color: Color = Color("fff0d0"),
+	alignment: HorizontalAlignment = HORIZONTAL_ALIGNMENT_LEFT
+) -> Label:
+	var label := Label.new()
+	label.text = text
+	label.horizontal_alignment = alignment
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.add_theme_font_size_override("font_size", _scaled_font_size(size))
+	label.modulate = color
+	parent.add_child(label)
+	return label
+
+
+func _add_flexible_spacer() -> void:
+	var spacer := Control.new()
+	spacer.name = "FlexibleSpacer"
+	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_content.add_child(spacer)
+
+
+func _make_round_badge(text: String, color: Color) -> PanelContainer:
+	var badge := PanelContainer.new()
+	badge.custom_minimum_size = Vector2(48, 44)
+	badge.add_theme_stylebox_override("panel", _ui_style_box(
+		Color("26332d"), color, 10, 2, Color(0.02, 0.015, 0.02, 0.45)
+	))
+	var label := _add_label_to(
+		badge,
+		text,
+		10,
+		Color("e7f1d7"),
+		HORIZONTAL_ALIGNMENT_CENTER
+	)
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	return badge
+
+
+func _add_pause_stat(parent: HBoxContainer, label_text: String, value_text: String) -> void:
+	var metric := _make_semantic_panel("route")
+	metric.custom_minimum_size = Vector2(72, 54)
+	metric.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	parent.add_child(metric)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 0)
+	metric.add_child(box)
+	_add_label_to(
+		box,
+		value_text,
+		17,
+		Color("fff0d0"),
+		HORIZONTAL_ALIGNMENT_CENTER
+	)
+	_add_label_to(
+		box,
+		label_text,
+		9,
+		Color("a99d8d"),
+		HORIZONTAL_ALIGNMENT_CENTER
+	)
+
+
+func _add_route_connector(parent: VBoxContainer, slopes_right: bool) -> void:
+	var connector := CenterContainer.new()
+	connector.custom_minimum_size = Vector2(0, 9)
+	connector.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(connector)
+	var label := _add_label_to(
+		connector,
+		"╲" if slopes_right else "╱",
+		12,
+		Color("8a6549"),
+		HORIZONTAL_ALIGNMENT_CENTER
+	)
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+
+func _make_visual_icon(texture: Texture2D, size: int, alpha: float = 1.0) -> TextureRect:
+	if texture == null:
+		return null
+	var icon := TextureRect.new()
+	icon.texture = texture
+	icon.custom_minimum_size = Vector2(size, size)
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	icon.modulate = Color(1.0, 1.0, 1.0, alpha)
+	return icon
+
+
+func _configure_scroll_passthrough(root: Control) -> void:
+	root.mouse_filter = Control.MOUSE_FILTER_PASS
+	for control_value: Variant in root.find_children("*", "Control", true, false):
+		var control := control_value as Control
+		if control == null or control is Button:
+			continue
+		control.mouse_filter = (
+			Control.MOUSE_FILTER_IGNORE
+			if control is Label or control is TextureRect
+			else Control.MOUSE_FILTER_PASS
+		)
+
+
+func _add_recipe_item_chip(parent: Container, amount: Dictionary, expanded: bool) -> VBoxContainer:
+	var chip := VBoxContainer.new()
+	chip.add_theme_constant_override("separation", 1)
+	chip.custom_minimum_size = Vector2(64 if expanded else 50, 48)
+	chip.size_flags_horizontal = Control.SIZE_EXPAND_FILL if expanded else Control.SIZE_SHRINK_CENTER
+	parent.add_child(chip)
+	var icon := _make_visual_icon(
+		VisualCatalogScript.item_texture(str(amount.get("item_id", ""))),
+		30 if expanded else 25,
+		1.0
+	)
+	if icon != null:
+		icon.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		chip.add_child(icon)
+	var label := _add_label_to(
+		chip,
+		_recipe_amount_text(amount),
+		9,
+		Color("f2dfc2"),
+		HORIZONTAL_ALIGNMENT_CENTER
+	)
+	label.max_lines_visible = 2
+	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	return chip
 
 
 func _add_heading(text: String) -> Label:
@@ -1610,16 +2249,7 @@ func _make_button(text: String, callback: Callable, primary: bool) -> Button:
 	button.text = text
 	button.custom_minimum_size = Vector2(0, 48 if primary else 44)
 	button.add_theme_font_size_override("font_size", _scaled_font_size(16 if primary else 14))
-	if primary:
-		button.add_theme_stylebox_override("normal", _ui_style_box(
-			Color("b85b35"), Color("f3a455"), 11, 5, Color(0.04, 0.025, 0.03, 0.78)
-		))
-		button.add_theme_stylebox_override("hover", _ui_style_box(
-			Color("cc6940"), Color("ffc26f"), 11, 5, Color(0.04, 0.025, 0.03, 0.8)
-		))
-		button.add_theme_stylebox_override("pressed", _ui_style_box(
-			Color("98482e"), Color("f07b43"), 11, 1, Color(0.04, 0.025, 0.03, 0.42)
-		))
+	_apply_button_role(button, "primary" if primary else "secondary")
 	button.pressed.connect(callback)
 	return button
 

@@ -161,6 +161,17 @@ static func run(test: TestFramework) -> void:
 
 	var facility_cells := screen.find_children("FacilityCell_*", "PanelContainer", true, false)
 	test.assert_equal(facility_cells.size(), 6, "play screen must keep the fixed 3x2 facility set")
+	test.assert_true(
+		screen.find_child("WorkshopBoard", true, false) is PanelContainer,
+		"play facilities must live on a dedicated workbench instead of stretching as a form"
+	)
+	var workshop_floor := screen.find_child("WorkshopFloor", true, false) as Control
+	test.assert_true(workshop_floor != null, "the workbench must provide a spatial floor layer")
+	test.assert_equal(
+		workshop_floor.mouse_filter,
+		Control.MOUSE_FILTER_IGNORE,
+		"workbench decoration must never intercept drag input"
+	)
 	for required_name: String in [
 		"PauseButton",
 		"SourceSupply_MAT_IRON_ORE",
@@ -191,10 +202,11 @@ static func run(test: TestFramework) -> void:
 		true,
 		false
 	) as TextureRect
-	test.assert_equal(
-		furnace_sprite.custom_minimum_size,
-		Vector2(56, 56),
-		"facility sprites use a stable 56px logical footprint"
+	test.assert_true(
+		furnace_sprite.custom_minimum_size.x >= 72.0
+		and furnace_sprite.custom_minimum_size.x <= 96.0
+		and furnace_sprite.custom_minimum_size.y == furnace_sprite.custom_minimum_size.x,
+		"facility artwork stays prominent and square within the mobile workbench"
 	)
 	for decoration_value: Variant in screen.find_children("*", "TextureRect", true, false):
 		var decoration: TextureRect = decoration_value
@@ -224,6 +236,15 @@ static func run(test: TestFramework) -> void:
 			CanvasItem.TEXTURE_FILTER_LINEAR,
 			"buttons containing runtime art must use linear filtering: %s" % decorated_button_name
 		)
+		test.assert_equal(
+			decorated_button.get_theme_color("font_color"),
+			Color.TRANSPARENT,
+			"decorated buttons must not draw native text over their icon: %s" % decorated_button_name
+		)
+	test.assert_true(
+		screen.find_child("SelectedCue_ItemIcon_SourceSupply_MAT_IRON_ORE", true, false) != null,
+		"a selected decorated source must retain a non-color shape cue"
+	)
 	test.assert_contains(
 		(screen.find_child("SourceSupply_MAT_IRON_ORE", true, false) as Button).text,
 		"철광석",
@@ -269,6 +290,9 @@ static func run(test: TestFramework) -> void:
 			"every play button must have a 44x44 minimum tap target: %s" % button.name
 		)
 	for removed_destination_name: String in [
+		"Destination_FAC_FURNACE",
+		"Destination_FAC_WEAPON_BENCH",
+		"DestinationTrash",
 		"DestinationInventory",
 		"DestinationDelivery",
 		"DestinationTrashAction",
@@ -398,6 +422,23 @@ static func run(test: TestFramework) -> void:
 	(screen.find_child("Start_FAC_WEAPON_BENCH", true, false) as Button).pressed.emit()
 	(screen.find_child("Store_FAC_FURNACE", true, false) as Button).pressed.emit()
 	(screen.find_child("PauseButton", true, false) as Button).pressed.emit()
+	var facility_tap := InputEventMouseButton.new()
+	facility_tap.button_index = MOUSE_BUTTON_LEFT
+	facility_tap.pressed = true
+	screen._on_destination_gui_input(
+		facility_tap,
+		{"kind": "facility_input", "facility_id": "FAC_WEAPON_BENCH"}
+	)
+	test.assert_equal(
+		observed_destinations,
+		[{"kind": "delivery"}],
+		"a destination tile must not activate on touch-down"
+	)
+	facility_tap.pressed = false
+	screen._on_destination_gui_input(
+		facility_tap,
+		{"kind": "facility_input", "facility_id": "FAC_WEAPON_BENCH"}
+	)
 	var inventory_drop_target := screen.find_child(
 		"DropTargetInventory_0",
 		true,
@@ -415,7 +456,10 @@ static func run(test: TestFramework) -> void:
 	)
 	screen._forward_drop_data(Vector2.ZERO, supply_payload, delivery_drop_target)
 	test.assert_equal(observed_sources, [selected_source], "supply tap must emit its source DTO")
-	test.assert_equal(observed_destinations, [{"kind": "delivery"}], "delivery tap must emit destination")
+	test.assert_equal(observed_destinations, [
+		{"kind": "delivery"},
+		{"kind": "facility_input", "facility_id": "FAC_WEAPON_BENCH"},
+	], "delivery and facility release taps emit their destination DTOs")
 	test.assert_equal(observed_drops, [{
 		"source": furnace_output_source,
 		"destination": {"kind": "inventory", "slot": 0},

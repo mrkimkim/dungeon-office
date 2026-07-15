@@ -89,6 +89,16 @@ static func run(test: TestFramework) -> void:
 		app.find_child("RecipeStep_RCP_CRAFT_DAGGER", true, false) != null,
 		"dagger recipe includes its final crafting step"
 	)
+	test.assert_equal(
+		(app.find_child("RecipeStep_RCP_SMELT_IRON", true, false) as Control).mouse_filter,
+		Control.MOUSE_FILTER_PASS,
+		"recipe process cards must pass finger drags to the parent scroll view"
+	)
+	test.assert_equal(
+		(app.find_child("RecipeRawMaterials", true, false) as Control).mouse_filter,
+		Control.MOUSE_FILTER_PASS,
+		"recipe material cards must pass finger drags to the parent scroll view"
+	)
 	test.assert_true(app._handle_back_request(), "Android Back handles an open recipe guide")
 	test.assert_equal(app._screen, "play", "Back returns from the recipe guide to play")
 	test.assert_false(

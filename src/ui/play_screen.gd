@@ -23,9 +23,10 @@ const FACILITY_ORDER: Array[String] = [
 	"FAC_ENHANCE_ANVIL",
 ]
 const MINIMUM_TAP_SIZE: Vector2 = Vector2(44, 44)
-const FACILITY_SPRITE_SIZE: int = 56
-const ITEM_ICON_SIZE: int = 24
-const DRAG_PREVIEW_ICON_SIZE: int = 40
+const FACILITY_SPRITE_SIZE: int = 82
+const ITEM_ICON_SIZE: int = 34
+const DRAG_PREVIEW_ICON_SIZE: int = 44
+const FACILITY_GRID_HEIGHT: int = 294
 const DRAG_PAYLOAD_TYPE: String = "dungeon_office/item_source_v1"
 
 var _catalog: Dictionary = {}
@@ -43,8 +44,8 @@ var _drop_target_roots: Array[Control] = []
 func _init() -> void:
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	size_flags_vertical = Control.SIZE_EXPAND_FILL
-	add_theme_constant_override("separation", 4)
-	clip_contents = true
+	add_theme_constant_override("separation", 5)
+	clip_contents = false
 
 
 func set_display_options(settings: Dictionary) -> void:
@@ -183,40 +184,25 @@ func _update_dynamic_text(feedback: String) -> void:
 	)
 	var timer_label := find_child("RoundTimerLabel", true, false) as Label
 	if timer_label != null:
-		timer_label.text = "%s %s · %s%s" % [
+		timer_label.text = "%s  ·  %s%s" % [
 			str(_round_definition.get("id", "?")),
-			str(_round_definition.get("display_name", "")),
 			_format_seconds(ceili(float(remaining_ticks) / float(tick_rate))),
-			" · 일시정지" if bool(_round_state.get("paused", false)) else "",
+			"  ⏸" if bool(_round_state.get("paused", false)) else "",
 		]
 	var score_label := find_child("ScoreLabel", true, false) as Label
 	if score_label != null:
-		var cutlines: Array = _round_definition.get("cutlines", [])
-		var cutline_text := ""
-		if cutlines.size() >= 3:
-			cutline_text = " · ★%d ★★%d ★★★%d" % [
-				int(cutlines[0]),
-				int(cutlines[1]),
-				int(cutlines[2]),
-			]
-		score_label.text = "점수 %d%s" % [int(_round_state.get("score", 0)), cutline_text]
+		score_label.text = _score_summary_text()
 	var selection_label := find_child("SelectedSourceLabel", true, false) as Label
 	if selection_label != null:
-		selection_label.text = (
-			"선택 없음"
-			if _selected_source.is_empty()
-			else "선택: %s" % _source_description(_selected_source)
-		)
+		selection_label.visible = not _selected_source.is_empty()
+		selection_label.text = "손에 든 아이템  ·  %s" % _source_description(_selected_source)
 	var feedback_label := find_child("FeedbackLabel", true, false) as Label
 	if feedback_label != null:
-		feedback_label.text = (
-			"아이템을 끌어 시설·빈칸·납품대·쓰레기통에 놓으세요."
-			if feedback.strip_edges().is_empty()
-			else feedback.strip_edges()
-		)
+		feedback_label.visible = not feedback.strip_edges().is_empty()
+		feedback_label.text = feedback.strip_edges()
 	var waiting_label := find_child("WaitingRequestLabel", true, false) as Label
 	if waiting_label != null:
-		waiting_label.text = "대기 %d" % _round_state.get("waiting_requests", []).size()
+		waiting_label.text = "+%d" % _round_state.get("waiting_requests", []).size()
 	for request_value: Variant in _round_state.get("active_requests", []):
 		var request: Dictionary = request_value
 		var request_timer := find_child(
@@ -243,14 +229,18 @@ func _update_dynamic_text(feedback: String) -> void:
 			idle_workers += 1
 	var worker_label := find_child("WorkerStatusLabel", true, false) as Label
 	if worker_label != null:
-		worker_label.text = "일꾼 %d/%d 유휴 · 인벤토리" % [idle_workers, workers.size()]
+		worker_label.text = _worker_summary_text(idle_workers, workers.size())
 
 
 func _build_header() -> void:
+	var header_panel := _make_panel("hud")
+	header_panel.name = "PlayHudPanel"
+	header_panel.custom_minimum_size = Vector2(0, 48)
+	add_child(header_panel)
+
 	var header := HBoxContainer.new()
-	header.custom_minimum_size = Vector2(0, 44)
 	header.add_theme_constant_override("separation", 4)
-	add_child(header)
+	header_panel.add_child(header)
 
 	var summary := VBoxContainer.new()
 	summary.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -263,41 +253,35 @@ func _build_header() -> void:
 		int(_round_state.get("deadline_ticks", 0)) - int(_round_state.get("tick", 0))
 	)
 	var remaining_seconds := ceili(float(remaining_ticks) / float(tick_rate))
-	var paused_suffix := " · 일시정지" if bool(_round_state.get("paused", false)) else ""
+	var paused_suffix := "  ⏸" if bool(_round_state.get("paused", false)) else ""
 	var timer_label := _add_label(
 		summary,
-		"%s %s · %s%s" % [
+		"%s  ·  %s%s" % [
 			str(_round_definition.get("id", "?")),
-			str(_round_definition.get("display_name", "")),
 			_format_seconds(remaining_seconds),
 			paused_suffix,
 		],
-		15
+		16,
+		Color("fff1cf")
 	)
 	timer_label.name = "RoundTimerLabel"
 
-	var cutlines: Array = _round_definition.get("cutlines", [])
-	var cutline_text := ""
-	if cutlines.size() >= 3:
-		cutline_text = " · ★%d ★★%d ★★★%d" % [
-			int(cutlines[0]),
-			int(cutlines[1]),
-			int(cutlines[2]),
-		]
 	var score_label := _add_label(
 		summary,
-		"점수 %d%s" % [int(_round_state.get("score", 0)), cutline_text],
-		12,
-		Color("d8c7aa")
+		_score_summary_text(),
+		11,
+		Color("d7c4a2")
 	)
 	score_label.name = "ScoreLabel"
 
 	var pause_button := _make_button(
-		"재개" if bool(_round_state.get("paused", false)) else "정지",
+		"▶" if bool(_round_state.get("paused", false)) else "Ⅱ",
 		Callable(self, "_emit_pause")
 	)
 	pause_button.name = "PauseButton"
-	pause_button.custom_minimum_size = Vector2(58, 44)
+	pause_button.tooltip_text = "재개" if bool(_round_state.get("paused", false)) else "일시정지"
+	pause_button.custom_minimum_size = Vector2(44, 44)
+	_apply_button_style(pause_button, "ghost")
 	pause_button.disabled = not bool(
 		_read_model.get("commands", {}).get("can_pause", false)
 	)
@@ -305,70 +289,100 @@ func _build_header() -> void:
 
 
 func _build_feedback(feedback: String) -> void:
-	var selected_text := "선택 없음"
-	if not _selected_source.is_empty():
-		selected_text = "선택: %s" % _source_description(_selected_source)
-	var selection_label := _add_label(self, selected_text, 12, Color("efe1c6"))
+	var selection_label := _add_label(
+		self,
+		"손에 든 아이템  ·  %s" % _source_description(_selected_source),
+		11,
+		Color("9ce3c7"),
+		HORIZONTAL_ALIGNMENT_CENTER
+	)
 	selection_label.name = "SelectedSourceLabel"
-	selection_label.custom_minimum_size = Vector2(0, 18)
+	selection_label.visible = not _selected_source.is_empty()
+	selection_label.custom_minimum_size = Vector2(0, 22)
 	selection_label.autowrap_mode = TextServer.AUTOWRAP_OFF
 	selection_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 
 	var message := feedback.strip_edges()
-	if message.is_empty():
-		message = "아이템을 끌어 시설·빈칸·납품대·쓰레기통에 놓으세요."
-	var feedback_label := _add_label(self, message, 12, Color("f2bd69"))
+	var feedback_label := _add_label(
+		self,
+		message,
+		11,
+		Color("f6c66d"),
+		HORIZONTAL_ALIGNMENT_CENTER
+	)
 	feedback_label.name = "FeedbackLabel"
-	feedback_label.custom_minimum_size = Vector2(0, 40 if _large_text_enabled else 34)
-	feedback_label.max_lines_visible = 2
+	feedback_label.visible = not message.is_empty()
+	feedback_label.custom_minimum_size = Vector2(0, 24 if _large_text_enabled else 22)
+	feedback_label.max_lines_visible = 1
 	feedback_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 
 
 func _build_requests() -> void:
-	var title_row := HBoxContainer.new()
-	add_child(title_row)
-	var request_title := _add_label(title_row, "의뢰", 13)
-	request_title.name = "RequestTitleLabel"
-	request_title.custom_minimum_size = Vector2(48, 20)
-	request_title.autowrap_mode = TextServer.AUTOWRAP_OFF
-	var waiting_count := int(_round_state.get("waiting_requests", []).size())
-	if waiting_count > 0:
-		var spacer := Control.new()
-		spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		title_row.add_child(spacer)
-		var waiting_label := _add_label(title_row, "대기 %d" % waiting_count, 11, Color("b8aa94"))
-		waiting_label.name = "WaitingRequestLabel"
-
 	var request_row := HBoxContainer.new()
-	request_row.add_theme_constant_override("separation", 4)
-	request_row.custom_minimum_size = Vector2(0, 54)
+	request_row.name = "RequestTicketRow"
+	request_row.add_theme_constant_override("separation", 5)
+	request_row.custom_minimum_size = Vector2(0, 68)
 	add_child(request_row)
 	var active_requests: Array = _round_state.get("active_requests", [])
 	if active_requests.is_empty():
-		var empty_panel := _make_panel()
+		var empty_panel := _make_panel("request_empty")
 		empty_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		request_row.add_child(empty_panel)
-		_add_label(empty_panel, "현재 의뢰 없음", 12, Color("a99d8a"), HORIZONTAL_ALIGNMENT_CENTER)
+		_add_label(
+			empty_panel,
+			"새 의뢰를 기다리는 중 · 재료를 미리 준비하세요",
+			11,
+			Color("bcae99"),
+			HORIZONTAL_ALIGNMENT_CENTER
+		)
 		return
 
 	var tick_rate := maxi(1, int(_catalog.get("rules", {}).get("tick_rate", 20)))
 	for request_value: Variant in active_requests:
 		var request: Dictionary = request_value
-		var panel := _make_panel()
-		panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		request_row.add_child(panel)
+		var item_text := _item_name(
+			str(request.get("item_id", "")),
+			int(request.get("required_level", 0))
+		)
+		var recipe_button := _make_button(
+			item_text,
+			Callable(self, "_emit_recipe").bind(
+				str(request.get("item_id", "")),
+				int(request.get("required_level", 0))
+			),
+			9
+		)
+		recipe_button.name = "RecipeButton_%s" % str(request.get("event_id", "unknown"))
+		recipe_button.tooltip_text = "%s 제작법 보기" % item_text
+		recipe_button.custom_minimum_size = Vector2(96, 68)
+		recipe_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		recipe_button.clip_contents = true
+		_apply_button_style(recipe_button, "request")
+		_hide_button_text(recipe_button)
+		request_row.add_child(recipe_button)
+
+		var margin := MarginContainer.new()
+		margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		margin.add_theme_constant_override("margin_left", 5)
+		margin.add_theme_constant_override("margin_top", 4)
+		margin.add_theme_constant_override("margin_right", 5)
+		margin.add_theme_constant_override("margin_bottom", 4)
+		recipe_button.add_child(margin)
+		margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		var request_content := HBoxContainer.new()
-		request_content.add_theme_constant_override("separation", 2)
-		panel.add_child(request_content)
+		request_content.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		request_content.add_theme_constant_override("separation", 3)
+		margin.add_child(request_content)
 		var request_icon := _make_texture_decoration(
 			VisualCatalogScript.item_texture(str(request.get("item_id", ""))),
 			ITEM_ICON_SIZE,
-			0.9
+			1.0
 		)
 		if request_icon != null:
 			request_icon.name = "RequestIcon_%s" % str(request.get("event_id", "unknown"))
 			request_content.add_child(request_icon)
 		var request_box := VBoxContainer.new()
+		request_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		request_box.add_theme_constant_override("separation", 0)
 		request_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		request_content.add_child(request_box)
@@ -377,95 +391,144 @@ func _build_requests() -> void:
 			str(request.get("request_id", ""))
 		)
 		var forecast := bool(request_definition.get("forecast", false))
-		var item_text := _item_name(
-			str(request.get("item_id", "")),
-			int(request.get("required_level", 0))
-		)
 		var request_item := _add_label(
 			request_box,
 			("[예고] " if forecast else "") + item_text,
-			11,
-			Color("f3e6ce"),
-			HORIZONTAL_ALIGNMENT_CENTER
+			10,
+			Color("3c2a22"),
+			HORIZONTAL_ALIGNMENT_LEFT
 		)
 		request_item.name = "RequestItem_%s" % str(request.get("event_id", "unknown"))
+		request_item.max_lines_visible = 1
+		request_item.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		var patience_seconds := ceili(
 			float(maxi(0, int(request.get("remaining_patience_ticks", 0)))) / float(tick_rate)
 		)
 		var request_timer := _add_label(
 			request_box,
 			"%d점 · %d초" % [int(request.get("score", 0)), patience_seconds],
-			10,
-			Color("cbbda5"),
-			HORIZONTAL_ALIGNMENT_CENTER
+			9,
+			Color("71523b"),
+			HORIZONTAL_ALIGNMENT_LEFT
 		)
 		request_timer.name = "RequestTimer_%s" % str(request.get("event_id", "unknown"))
-		var recipe_button := _make_button(
-			"제작법",
-			Callable(self, "_emit_recipe").bind(
-				str(request.get("item_id", "")),
-				int(request.get("required_level", 0))
-			),
-			9
+		var guide_hint := _add_label(
+			request_box,
+			"제작법  ›",
+			8,
+			Color("a4572f"),
+			HORIZONTAL_ALIGNMENT_LEFT
 		)
-		recipe_button.name = "RecipeButton_%s" % str(request.get("event_id", "unknown"))
-		recipe_button.tooltip_text = "%s 전체 제작법" % item_text
-		request_box.add_child(recipe_button)
+		guide_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	var waiting_count := int(_round_state.get("waiting_requests", []).size())
+	if waiting_count > 0:
+		var waiting_label := _add_label(
+			request_row,
+			"+%d" % waiting_count,
+			10,
+			Color("d9c8ae"),
+			HORIZONTAL_ALIGNMENT_CENTER
+		)
+		waiting_label.name = "WaitingRequestLabel"
+		waiting_label.custom_minimum_size = Vector2(24, 68)
+		waiting_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 
 
 func _build_facilities() -> void:
+	var board := _make_panel("board")
+	board.name = "WorkshopBoard"
+	board.custom_minimum_size = Vector2(0, FACILITY_GRID_HEIGHT + 8)
+	board.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	board.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	add_child(board)
+
+	var floor := Control.new()
+	floor.name = "WorkshopFloor"
+	floor.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	floor.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	floor.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	floor.draw.connect(Callable(self, "_draw_workshop_floor").bind(floor))
+	board.add_child(floor)
+
+	var center := CenterContainer.new()
+	center.name = "WorkshopGridCenter"
+	center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	center.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	board.add_child(center)
+
 	var grid := GridContainer.new()
+	grid.name = "FacilityGrid"
 	grid.columns = 3
+	grid.custom_minimum_size = Vector2(326, FACILITY_GRID_HEIGHT)
 	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	grid.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	grid.add_theme_constant_override("h_separation", 4)
-	grid.add_theme_constant_override("v_separation", 4)
-	add_child(grid)
+	grid.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	grid.add_theme_constant_override("h_separation", 5)
+	grid.add_theme_constant_override("v_separation", 5)
+	center.add_child(grid)
 
 	for facility_id: String in FACILITY_ORDER:
 		_build_facility_cell(grid, facility_id)
 
 
 func _build_facility_cell(parent: Container, facility_id: String) -> void:
-	var panel := _make_panel()
+	var installed: bool = (
+		facility_id in ["FAC_SUPPLY", "FAC_TRASH"]
+		or _round_state.get("facilities", {}).has(facility_id)
+	)
+	var panel := _make_panel("facility" if installed else "facility_locked")
 	panel.name = "FacilityCell_%s" % facility_id
-	panel.custom_minimum_size = Vector2(100, 104)
+	panel.custom_minimum_size = Vector2(104, 142)
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	panel.clip_contents = true
 	parent.add_child(panel)
 	_add_facility_sprite(panel, facility_id)
 
 	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 2)
+	box.add_theme_constant_override("separation", 1)
 	panel.add_child(box)
 	var facility_name_label := _add_label(
 		box,
 		_facility_name(facility_id),
-		11,
-		Color("f1dfc1"),
+		10,
+		Color("fff0d0") if installed else Color("7d746d"),
 		HORIZONTAL_ALIGNMENT_CENTER
 	)
 	facility_name_label.name = "FacilityName_%s" % facility_id
+	facility_name_label.custom_minimum_size = Vector2(0, 17)
+	facility_name_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	facility_name_label.max_lines_visible = 1
+	facility_name_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	facility_name_label.add_theme_constant_override("outline_size", 2)
+	facility_name_label.add_theme_color_override("font_outline_color", Color("201719"))
 
 	if facility_id == "FAC_SUPPLY":
 		_build_supply_cell(box)
 		return
 	if facility_id == "FAC_TRASH":
-		_add_label(box, "선택 아이템 제거", 9, Color("b9aa95"), HORIZONTAL_ALIGNMENT_CENTER)
-		var discard_button := _make_button(
-			"파기",
-			Callable(self, "_emit_destination").bind({"kind": "trash"}),
-			10
+		var trash_spacer := Control.new()
+		trash_spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		box.add_child(trash_spacer)
+		var trash_hint := _add_label(
+			box,
+			"여기에 버리기",
+			9,
+			Color("c4a898"),
+			HORIZONTAL_ALIGNMENT_CENTER
 		)
-		discard_button.name = "DestinationTrash"
-		discard_button.disabled = not _round_interactive
-		box.add_child(discard_button)
-		_register_drop_target_tree(panel, {"kind": "trash"})
+		trash_hint.custom_minimum_size = Vector2(0, 22)
+		var trash_destination := {"kind": "trash"}
+		_register_tappable_destination(panel, trash_destination)
+		_register_drop_target_tree(panel, trash_destination)
 		return
 
 	var facilities: Dictionary = _round_state.get("facilities", {})
 	if not facilities.has(facility_id):
-		_add_label(box, "미설치", 11, Color("82796d"), HORIZONTAL_ALIGNMENT_CENTER)
+		var locked_spacer := Control.new()
+		locked_spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		box.add_child(locked_spacer)
+		_add_label(box, "잠김", 9, Color("756d68"), HORIZONTAL_ALIGNMENT_CENTER)
 		return
 
 	var facility: Dictionary = facilities[facility_id]
@@ -478,9 +541,17 @@ func _build_facility_cell(parent: Container, facility_id: String) -> void:
 		HORIZONTAL_ALIGNMENT_CENTER
 	)
 	status_label.name = "FacilityStatus_%s" % facility_id
+	status_label.custom_minimum_size = Vector2(0, 16)
+	status_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	status_label.max_lines_visible = 1
+	status_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+
+	var content_spacer := Control.new()
+	content_spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	box.add_child(content_spacer)
 
 	var item_row := HBoxContainer.new()
-	item_row.add_theme_constant_override("separation", 2)
+	item_row.add_theme_constant_override("separation", 3)
 	item_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	box.add_child(item_row)
 	for input_index: int in range(facility.get("inputs", []).size()):
@@ -499,12 +570,14 @@ func _build_facility_cell(parent: Container, facility_id: String) -> void:
 			9
 		)
 		input_button.name = "SourceInput_%s_%d" % [facility_id, input_index]
+		_apply_button_style(input_button, "slot")
 		_decorate_item_button(
 			input_button,
 			str(input_item.get("item_id", "")),
 			"ItemIcon_%s" % input_button.name,
 			9
 		)
+		input_button.tooltip_text = input_button.text
 		item_row.add_child(input_button)
 
 	if status == "output" and facility.get("output") is Dictionary:
@@ -519,96 +592,112 @@ func _build_facility_cell(parent: Container, facility_id: String) -> void:
 			9
 		)
 		output_button.name = "SourceOutput_%s" % facility_id
+		_apply_button_style(output_button, "complete_slot")
 		_decorate_item_button(
 			output_button,
 			str(output.get("item_id", "")),
 			"ItemIcon_%s" % output_button.name,
 			9
 		)
+		output_button.tooltip_text = output_button.text
 		item_row.add_child(output_button)
 
-	var action_row := HBoxContainer.new()
-	action_row.add_theme_constant_override("separation", 2)
-	action_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	box.add_child(action_row)
-	if status not in ["working", "output"]:
-		var destination := {"kind": "facility_input", "facility_id": facility_id}
-		var destination_button := _make_button(
-			"투입",
-			Callable(self, "_emit_destination").bind(destination),
-			9
-		)
-		destination_button.name = "Destination_%s" % facility_id
-		destination_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		destination_button.disabled = not _round_interactive
-		action_row.add_child(destination_button)
 	if status == "ready":
 		var start_button := _make_button(
-			"시작",
+			"▶  시작",
 			Callable(self, "_emit_start").bind(facility_id),
 			9
 		)
 		start_button.name = "Start_%s" % facility_id
 		start_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		start_button.disabled = not _facility_command_available(facility_id, "can_start")
-		action_row.add_child(start_button)
+		_apply_button_style(start_button, "primary")
+		box.add_child(start_button)
 	elif status == "output":
 		var store_button := _make_button(
-			"수납",
+			"✓  수납",
 			Callable(self, "_emit_store").bind(facility_id),
 			9
 		)
 		store_button.name = "Store_%s" % facility_id
 		store_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		store_button.disabled = not _facility_command_available(facility_id, "can_store")
-		action_row.add_child(store_button)
+		_apply_button_style(store_button, "success")
+		box.add_child(store_button)
+	elif facility.get("inputs", []).is_empty() and status not in ["working", "output"]:
+		var drop_hint := _add_label(
+			box,
+			"재료 놓기",
+			9,
+			Color("bfae92"),
+			HORIZONTAL_ALIGNMENT_CENTER
+		)
+		drop_hint.custom_minimum_size = Vector2(0, 22)
 
-	_register_drop_target_tree(panel, {
+	var destination := {
 		"kind": "facility_input",
 		"facility_id": facility_id,
-	})
+	}
+	_register_tappable_destination(panel, destination)
+	_register_drop_target_tree(panel, destination)
 
 
 func _build_supply_cell(parent: VBoxContainer) -> void:
-	_add_label(parent, "공급 슬롯", 9, Color("b9aa95"), HORIZONTAL_ALIGNMENT_CENTER)
+	var spacer := Control.new()
+	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	parent.add_child(spacer)
 	var supply_grid := GridContainer.new()
 	supply_grid.columns = 2
 	supply_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	supply_grid.add_theme_constant_override("h_separation", 2)
-	supply_grid.add_theme_constant_override("v_separation", 2)
+	supply_grid.add_theme_constant_override("h_separation", 3)
+	supply_grid.add_theme_constant_override("v_separation", 3)
 	parent.add_child(supply_grid)
 	for item_id_value: Variant in _round_definition.get("supply_items", []):
 		var item_id := str(item_id_value)
 		var source := {"kind": "supply", "item_id": item_id}
 		var button := _make_source_button(_item_name(item_id, 0), source, 9)
 		button.name = "SourceSupply_%s" % item_id
+		_apply_button_style(button, "supply_slot")
 		_decorate_item_button(
 			button,
 			item_id,
 			"ItemIcon_%s" % button.name,
 			9
 		)
+		button.tooltip_text = "%s 가져오기" % _item_name(item_id, 0)
 		supply_grid.add_child(button)
 
 
 func _build_worker_and_inventory() -> void:
+	var dock := _make_panel("inventory")
+	dock.name = "InventoryDock"
+	dock.custom_minimum_size = Vector2(0, 76)
+	dock.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	add_child(dock)
+
+	var dock_box := VBoxContainer.new()
+	dock_box.add_theme_constant_override("separation", 2)
+	dock.add_child(dock_box)
+
 	var workers: Array = _round_state.get("workers", [])
 	var idle_workers := 0
 	for worker_value: Variant in workers:
 		if str(worker_value.get("facility_id", "")).is_empty():
 			idle_workers += 1
 	var worker_label := _add_label(
-		self,
-		"일꾼 %d/%d 유휴 · 인벤토리" % [idle_workers, workers.size()],
-		12,
-		Color("d8c7aa")
+		dock_box,
+		_worker_summary_text(idle_workers, workers.size()),
+		10,
+		Color("d8c7aa"),
+		HORIZONTAL_ALIGNMENT_CENTER
 	)
 	worker_label.name = "WorkerStatusLabel"
+	worker_label.custom_minimum_size = Vector2(0, 16)
 
 	var inventory_row := HBoxContainer.new()
 	inventory_row.add_theme_constant_override("separation", 4)
-	inventory_row.custom_minimum_size = Vector2(0, 44)
-	add_child(inventory_row)
+	inventory_row.custom_minimum_size = Vector2(0, 52)
+	dock_box.add_child(inventory_row)
 	var inventory: Array = _round_state.get("inventory", [])
 	var capacity := int(_round_definition.get("inventory_capacity", inventory.size()))
 	for slot: int in range(capacity):
@@ -616,13 +705,15 @@ func _build_worker_and_inventory() -> void:
 		if item_value == null:
 			var inventory_destination := {"kind": "inventory", "slot": slot}
 			var empty_button := _make_button(
-				"%d\n빈칸" % (slot + 1),
+				"%d\n+" % (slot + 1),
 				Callable(self, "_emit_destination").bind(inventory_destination),
 				9
 			)
 			empty_button.name = "DropTargetInventory_%d" % slot
+			empty_button.tooltip_text = "인벤토리 %d번 빈칸" % (slot + 1)
 			empty_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			empty_button.disabled = not _round_interactive
+			_apply_button_style(empty_button, "empty_slot")
 			inventory_row.add_child(empty_button)
 			_register_drop_target_tree(empty_button, inventory_destination)
 			continue
@@ -640,7 +731,9 @@ func _build_worker_and_inventory() -> void:
 			9
 		)
 		item_button.name = "SourceInventory_%d" % slot
+		item_button.tooltip_text = item_button.text.replace("\n", " · ")
 		item_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_apply_button_style(item_button, "slot")
 		_decorate_item_button(
 			item_button,
 			str(item.get("item_id", "")),
@@ -658,6 +751,7 @@ func _build_worker_and_inventory() -> void:
 	delivery_button.tooltip_text = "완성 장비를 이곳에 놓으면 조건에 맞는 의뢰에 자동 납품합니다."
 	delivery_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	delivery_button.disabled = not _round_interactive
+	_apply_button_style(delivery_button, "delivery")
 	_decorate_button_with_texture(
 		delivery_button,
 		VisualCatalogScript.facility_texture("FAC_DELIVERY"),
@@ -685,7 +779,7 @@ func _add_facility_sprite(panel: PanelContainer, facility_id: String) -> void:
 	var sprite := _make_texture_decoration(
 		texture,
 		FACILITY_SPRITE_SIZE,
-		0.62 if installed else 0.18
+		0.94 if installed else 0.12
 	)
 	if sprite == null:
 		return
@@ -717,47 +811,59 @@ func _decorate_button_with_texture(
 		return
 	button.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	var visible_text := button.text
-	var icon := _make_texture_decoration(texture, ITEM_ICON_SIZE, 0.92)
+	var icon := _make_texture_decoration(texture, ITEM_ICON_SIZE, 1.0)
 	if icon == null:
 		return
 	icon.name = icon_name
 	button.add_child(icon)
-	icon.anchor_left = 0.0
+	icon.anchor_left = 0.5
 	icon.anchor_top = 0.5
-	icon.anchor_right = 0.0
+	icon.anchor_right = 0.5
 	icon.anchor_bottom = 0.5
-	icon.offset_left = 2.0
+	icon.offset_left = -float(ITEM_ICON_SIZE) / 2.0
 	icon.offset_top = -float(ITEM_ICON_SIZE) / 2.0
-	icon.offset_right = 2.0 + float(ITEM_ICON_SIZE)
+	icon.offset_right = float(ITEM_ICON_SIZE) / 2.0
 	icon.offset_bottom = float(ITEM_ICON_SIZE) / 2.0
 
 	# Keep Button.text as the semantic/test contract while drawing an outlined copy
 	# above the decorative icon. This avoids changing minimum widths in the dense
 	# 3x2 mobile grid and keeps disabled buttons visibly disabled.
-	for color_name: String in [
-		"font_color",
-		"font_hover_color",
-		"font_pressed_color",
-		"font_hover_pressed_color",
-		"font_focus_color",
-		"font_disabled_color",
-	]:
-		button.add_theme_color_override(color_name, Color.TRANSPARENT)
+	_hide_button_text(button)
 	var text_overlay := Label.new()
 	text_overlay.name = "%s_Text" % icon_name
-	text_overlay.text = visible_text
+	text_overlay.text = _button_caption(visible_text)
 	text_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	text_overlay.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	text_overlay.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	text_overlay.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	text_overlay.max_lines_visible = 2
+	text_overlay.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	text_overlay.autowrap_mode = TextServer.AUTOWRAP_OFF
+	text_overlay.max_lines_visible = 1
 	text_overlay.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	text_overlay.add_theme_font_size_override("font_size", _scaled_font_size(font_size))
+	text_overlay.add_theme_font_size_override("font_size", _scaled_font_size(mini(font_size, 8)))
 	text_overlay.add_theme_constant_override("outline_size", 2)
 	text_overlay.add_theme_color_override("font_outline_color", Color("241c19"))
 	text_overlay.modulate = Color("91877a") if button.disabled else Color("f4e7d0")
 	button.add_child(text_overlay)
 	text_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	if button.text.begins_with("● ") or button.text.begins_with("▣ "):
+		var selected_cue := Label.new()
+		selected_cue.name = "SelectedCue_%s" % icon_name
+		selected_cue.text = "▣" if button.text.begins_with("▣ ") else "●"
+		selected_cue.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		selected_cue.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		selected_cue.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		selected_cue.add_theme_font_size_override("font_size", _scaled_font_size(8))
+		selected_cue.add_theme_constant_override("outline_size", 2)
+		selected_cue.add_theme_color_override("font_outline_color", Color("17302a"))
+		selected_cue.modulate = Color("8ff0c8")
+		button.add_child(selected_cue)
+		selected_cue.anchor_left = 1.0
+		selected_cue.anchor_top = 0.0
+		selected_cue.anchor_right = 1.0
+		selected_cue.anchor_bottom = 0.0
+		selected_cue.offset_left = -17.0
+		selected_cue.offset_top = 2.0
+		selected_cue.offset_right = -2.0
+		selected_cue.offset_bottom = 17.0
 
 
 func _make_texture_decoration(
@@ -929,6 +1035,48 @@ func _make_drag_preview(item: Dictionary) -> Control:
 	return panel
 
 
+func _draw_workshop_floor(floor: Control) -> void:
+	var floor_size := floor.size
+	if floor_size.x <= 0.0 or floor_size.y <= 0.0:
+		return
+	floor.draw_rect(Rect2(Vector2.ZERO, floor_size), Color("2b211f"), true)
+	var glow_radius := minf(floor_size.x, floor_size.y) * 0.48
+	floor.draw_circle(
+		Vector2(floor_size.x * 0.5, floor_size.y * 0.48),
+		glow_radius,
+		Color(0.25, 0.16, 0.12, 0.34)
+	)
+	var plank_height := 32.0
+	var row := 0
+	var y := plank_height
+	while y < floor_size.y:
+		floor.draw_line(
+			Vector2(0.0, y),
+			Vector2(floor_size.x, y),
+			Color(0.10, 0.065, 0.06, 0.62),
+			1.0
+		)
+		var seam_offset := 30.0 if row % 2 == 0 else 64.0
+		var x := seam_offset
+		while x < floor_size.x:
+			floor.draw_line(
+				Vector2(x, y - plank_height),
+				Vector2(x, y),
+				Color(0.12, 0.075, 0.065, 0.48),
+				1.0
+			)
+			x += 92.0
+		y += plank_height
+		row += 1
+	for corner: Vector2 in [
+		Vector2(12.0, 12.0),
+		Vector2(floor_size.x - 12.0, 12.0),
+		Vector2(12.0, floor_size.y - 12.0),
+		Vector2(floor_size.x - 12.0, floor_size.y - 12.0),
+	]:
+		floor.draw_circle(corner, 2.5, Color("9a6845"))
+
+
 func _set_drop_target_highlights(data: Variant) -> void:
 	for target: Control in _drop_target_roots:
 		if not is_instance_valid(target):
@@ -937,8 +1085,8 @@ func _set_drop_target_highlights(data: Variant) -> void:
 		var valid := _can_drop_payload(data, destination)
 		target.set_meta("drop_valid", valid)
 		target.pivot_offset = target.size * 0.5
-		target.scale = Vector2(1.02, 1.02) if valid else Vector2.ONE
-		target.modulate = Color("d5ffe8") if valid else Color("8a808a")
+		target.scale = Vector2(1.035, 1.035) if valid else Vector2.ONE
+		target.modulate = Color("b9ffe1") if valid else Color.WHITE
 
 
 func _reset_drop_target_highlights() -> void:
@@ -950,29 +1098,168 @@ func _reset_drop_target_highlights() -> void:
 		target.modulate = Color.WHITE
 
 
-func _make_panel() -> PanelContainer:
+func _make_panel(kind: String = "default") -> PanelContainer:
 	var panel := PanelContainer.new()
+	var style: StyleBoxFlat
+	match kind:
+		"hud":
+			style = _play_style_box(Color("211d28"), Color("4a3d4a"), 12, 1, 7)
+		"board":
+			style = _play_style_box(Color("211c21"), Color("4a3937"), 14, 1, 4)
+		"facility":
+			style = _play_style_box(Color("352b2a"), Color("685047"), 12, 2, 4)
+		"facility_locked":
+			style = _play_style_box(Color("211e22"), Color("39343a"), 12, 1, 4)
+		"inventory":
+			style = _play_style_box(Color("242029"), Color("514451"), 12, 1, 5)
+		"request_empty":
+			style = _play_style_box(Color("252129"), Color("49404a"), 11, 1, 6)
+		_:
+			style = _play_style_box(Color("2b2530"), Color("625160"), 10, 2, 5)
+	panel.add_theme_stylebox_override("panel", style)
+	return panel
+
+
+func _play_style_box(
+	background: Color,
+	border: Color,
+	radius: int,
+	bottom_depth: int,
+	content_margin: int
+) -> StyleBoxFlat:
 	var style := StyleBoxFlat.new()
-	style.bg_color = Color("2c2631")
-	style.border_color = Color("695462")
+	style.bg_color = background
+	style.border_color = border
 	style.border_width_left = 1
 	style.border_width_top = 1
 	style.border_width_right = 1
-	style.border_width_bottom = 3
-	style.corner_radius_top_left = 9
-	style.corner_radius_top_right = 9
-	style.corner_radius_bottom_left = 9
-	style.corner_radius_bottom_right = 9
-	style.content_margin_left = 3
-	style.content_margin_top = 2
-	style.content_margin_right = 3
-	style.content_margin_bottom = 4
-	style.shadow_color = Color(0.02, 0.015, 0.025, 0.65)
-	style.shadow_size = 3
-	style.shadow_offset = Vector2(0, 2)
+	style.border_width_bottom = bottom_depth
+	style.corner_radius_top_left = radius
+	style.corner_radius_top_right = radius
+	style.corner_radius_bottom_left = radius
+	style.corner_radius_bottom_right = radius
+	style.content_margin_left = content_margin
+	style.content_margin_top = content_margin
+	style.content_margin_right = content_margin
+	style.content_margin_bottom = content_margin + maxi(0, bottom_depth - 1)
 	style.anti_aliasing = true
-	panel.add_theme_stylebox_override("panel", style)
-	return panel
+	return style
+
+
+func _apply_button_style(button: Button, kind: String) -> void:
+	var background := Color("3b3039")
+	var border := Color("655260")
+	var hover := Color("493945")
+	var pressed := Color("2f272f")
+	var font := Color("fff0d0")
+	var radius := 10
+	var depth := 1
+	match kind:
+		"ghost":
+			background = Color("2b2630")
+			border = Color("5c505e")
+			hover = Color("3a323e")
+			pressed = Color("211d26")
+		"request":
+			background = Color("e5c98d")
+			border = Color("8a5f38")
+			hover = Color("f0d9a3")
+			pressed = Color("cfad70")
+			font = Color("3c2a22")
+			radius = 11
+			depth = 2
+		"slot":
+			background = Color(0.11, 0.09, 0.12, 0.86)
+			border = Color("725d50")
+			hover = Color("393039")
+			pressed = Color("171419")
+			radius = 11
+		"complete_slot":
+			background = Color("233a32")
+			border = Color("68c99f")
+			hover = Color("2e4c40")
+			pressed = Color("1b2f28")
+			radius = 11
+		"supply_slot":
+			background = Color("243842")
+			border = Color("5f9db3")
+			hover = Color("31505d")
+			pressed = Color("1c2c34")
+			radius = 11
+		"empty_slot":
+			background = Color("211e25")
+			border = Color("544a56")
+			hover = Color("302a34")
+			pressed = Color("17151a")
+			font = Color("a89ba8")
+			radius = 11
+		"primary":
+			background = Color("d66c35")
+			border = Color("f0a052")
+			hover = Color("e77e42")
+			pressed = Color("ae4f29")
+			font = Color("fff6df")
+			depth = 2
+		"success":
+			background = Color("287359")
+			border = Color("6ad0a6")
+			hover = Color("32886a")
+			pressed = Color("205b48")
+			font = Color("effff7")
+			depth = 2
+		"delivery":
+			background = Color("2a5361")
+			border = Color("68b6c9")
+			hover = Color("356979")
+			pressed = Color("213f4a")
+			font = Color("effaff")
+			depth = 2
+	button.add_theme_color_override("font_color", font)
+	button.add_theme_color_override("font_hover_color", font.lightened(0.08))
+	button.add_theme_color_override("font_pressed_color", font)
+	button.add_theme_color_override("font_focus_color", font)
+	button.add_theme_color_override("font_disabled_color", Color("827982"))
+	button.add_theme_stylebox_override(
+		"normal", _play_style_box(background, border, radius, depth, 3)
+	)
+	button.add_theme_stylebox_override(
+		"hover", _play_style_box(hover, border.lightened(0.12), radius, depth, 3)
+	)
+	button.add_theme_stylebox_override(
+		"pressed", _play_style_box(pressed, border, radius, 1, 3)
+	)
+	button.add_theme_stylebox_override(
+		"disabled", _play_style_box(Color("262229"), Color("403943"), radius, 1, 3)
+	)
+	button.add_theme_stylebox_override(
+		"focus", _play_style_box(Color.TRANSPARENT, Color("70cae8"), radius, 2, 1)
+	)
+	if button.text.begins_with("● ") or button.text.begins_with("▣ "):
+		button.add_theme_stylebox_override(
+			"normal",
+			_play_style_box(background.lightened(0.05), Color("73d8b0"), radius, 2, 3)
+		)
+		button.add_theme_stylebox_override(
+			"hover",
+			_play_style_box(hover.lightened(0.06), Color("9bf0ce"), radius, 2, 3)
+		)
+
+
+func _hide_button_text(button: Button) -> void:
+	for color_name: String in [
+		"font_color",
+		"font_hover_color",
+		"font_pressed_color",
+		"font_hover_pressed_color",
+		"font_focus_color",
+		"font_disabled_color",
+	]:
+		button.add_theme_color_override(color_name, Color.TRANSPARENT)
+
+
+func _button_caption(text: String) -> String:
+	var lines := text.split("\n", false)
+	return str(lines[-1]).replace("● ", "").replace("▣ ", "") if not lines.is_empty() else text
 
 
 func _make_button(text: String, callback: Callable, font_size: int = 11) -> Button:
@@ -981,6 +1268,7 @@ func _make_button(text: String, callback: Callable, font_size: int = 11) -> Butt
 	button.custom_minimum_size = MINIMUM_TAP_SIZE
 	button.add_theme_font_size_override("font_size", _scaled_font_size(font_size))
 	button.pressed.connect(callback)
+	_apply_button_style(button, "default")
 	return button
 
 
@@ -1009,8 +1297,26 @@ func _add_label(
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	label.add_theme_font_size_override("font_size", _scaled_font_size(font_size))
 	label.modulate = color
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	parent.add_child(label)
 	return label
+
+
+func _register_tappable_destination(control: Control, destination: Dictionary) -> void:
+	control.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	control.gui_input.connect(
+		Callable(self, "_on_destination_gui_input").bind(destination.duplicate(true))
+	)
+
+
+func _on_destination_gui_input(event: InputEvent, destination: Dictionary) -> void:
+	if not _round_interactive:
+		return
+	if not event is InputEventMouseButton or event.button_index != MOUSE_BUTTON_LEFT or event.pressed:
+		return
+	if is_inside_tree() and get_viewport() != null and get_viewport().gui_is_dragging():
+		return
+	destination_requested.emit(destination.duplicate(true))
 
 
 func _emit_source(source: Dictionary) -> void:
@@ -1085,16 +1391,23 @@ func _facility_status_text(facility: Dictionary) -> String:
 		}.get(status, "? "))
 	match status:
 		"empty":
-			return prefix + "비어 있음"
+			return prefix + "재료 대기"
 		"input":
-			return prefix + "부분 투입"
+			return prefix + "재료 받는 중"
 		"ready":
-			return prefix + "시작 가능"
+			return prefix + "준비 완료"
 		"working":
-			return prefix + "작업 %d틱" % maxi(0, int(facility.get("remaining_ticks", 0)))
+			var tick_rate := maxi(1, int(_catalog.get("rules", {}).get("tick_rate", 20)))
+			var remaining_seconds := ceili(
+				float(maxi(0, int(facility.get("remaining_ticks", 0)))) / float(tick_rate)
+			)
+			return prefix + "작업 중 · %d초" % remaining_seconds
 		"output":
 			var overheat_ticks := int(facility.get("overheat_remaining_ticks", 0))
-			return prefix + ("완료 · 과열 %d틱" % overheat_ticks if overheat_ticks > 0 else "완료")
+			if overheat_ticks > 0:
+				var tick_rate := maxi(1, int(_catalog.get("rules", {}).get("tick_rate", 20)))
+				return prefix + "완료 · 과열 %d초" % ceili(float(overheat_ticks) / float(tick_rate))
+			return prefix + "완료!"
 		_:
 			return prefix + status
 
@@ -1113,6 +1426,28 @@ func _status_color(status: String) -> Color:
 
 func _scaled_font_size(base_size: int) -> int:
 	return int(round(float(base_size) * (1.25 if _large_text_enabled else 1.0)))
+
+
+func _score_summary_text() -> String:
+	var score := int(_round_state.get("score", 0))
+	var cutlines: Array = _round_definition.get("cutlines", [])
+	var earned := 0
+	var next_cutline := -1
+	for cutline_value: Variant in cutlines:
+		var cutline := int(cutline_value)
+		if score >= cutline:
+			earned += 1
+		elif next_cutline < 0:
+			next_cutline = cutline
+	var stars := "★".repeat(earned) + "☆".repeat(maxi(0, 3 - earned))
+	if next_cutline >= 0:
+		return "%d점  ·  %s  다음 %d" % [score, stars, next_cutline]
+	return "%d점  ·  %s  최고 등급" % [score, stars]
+
+
+func _worker_summary_text(idle_workers: int, total_workers: int) -> String:
+	var pips := "●".repeat(idle_workers) + "○".repeat(maxi(0, total_workers - idle_workers))
+	return "일꾼  %s  %d/%d 유휴  ·  가방" % [pips, idle_workers, total_workers]
 
 
 func _item_name(item_id: String, enhancement_level: int) -> String:
