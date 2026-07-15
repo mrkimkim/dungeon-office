@@ -671,51 +671,48 @@ func _build_supply_cell(parent: VBoxContainer) -> void:
 func _build_worker_and_inventory() -> void:
 	var dock := _make_panel("inventory")
 	dock.name = "InventoryDock"
-	dock.custom_minimum_size = Vector2(0, 76)
+	dock.custom_minimum_size = Vector2(0, 58)
 	dock.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	add_child(dock)
 
-	var dock_box := VBoxContainer.new()
-	dock_box.add_theme_constant_override("separation", 2)
-	dock.add_child(dock_box)
+	var dock_row := HBoxContainer.new()
+	dock_row.add_theme_constant_override("separation", 4)
+	dock.add_child(dock_row)
 
 	var workers: Array = _round_state.get("workers", [])
 	var idle_workers := 0
 	for worker_value: Variant in workers:
 		if str(worker_value.get("facility_id", "")).is_empty():
 			idle_workers += 1
-	var worker_label := _add_label(
-		dock_box,
-		_worker_summary_text(idle_workers, workers.size()),
-		10,
-		Color("d8c7aa"),
-		HORIZONTAL_ALIGNMENT_CENTER
-	)
-	worker_label.name = "WorkerStatusLabel"
-	worker_label.custom_minimum_size = Vector2(0, 16)
-
-	var inventory_row := HBoxContainer.new()
-	inventory_row.add_theme_constant_override("separation", 4)
-	inventory_row.custom_minimum_size = Vector2(0, 52)
-	dock_box.add_child(inventory_row)
 	var inventory: Array = _round_state.get("inventory", [])
 	var capacity := int(_round_definition.get("inventory_capacity", inventory.size()))
+	var occupied_count := 0
+	for item_value: Variant in inventory:
+		if item_value != null:
+			occupied_count += 1
+
+	var dock_status := VBoxContainer.new()
+	dock_status.custom_minimum_size = Vector2(68, 48)
+	dock_status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	dock_status.alignment = BoxContainer.ALIGNMENT_CENTER
+	dock_status.add_theme_constant_override("separation", 0)
+	dock_row.add_child(dock_status)
+	var worker_label := _add_label(
+		dock_status,
+		_worker_summary_text(idle_workers, workers.size()),
+		8,
+		Color("d8c7aa"),
+		HORIZONTAL_ALIGNMENT_LEFT
+	)
+	worker_label.name = "WorkerStatusLabel"
+	worker_label.custom_minimum_size = Vector2(0, 20)
+
+	var first_empty_slot := -1
 	for slot: int in range(capacity):
 		var item_value: Variant = inventory[slot] if slot < inventory.size() else null
 		if item_value == null:
-			var inventory_destination := {"kind": "inventory", "slot": slot}
-			var empty_button := _make_button(
-				"%d\n+" % (slot + 1),
-				Callable(self, "_emit_destination").bind(inventory_destination),
-				9
-			)
-			empty_button.name = "DropTargetInventory_%d" % slot
-			empty_button.tooltip_text = "인벤토리 %d번 빈칸" % (slot + 1)
-			empty_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			empty_button.disabled = not _round_interactive
-			_apply_button_style(empty_button, "empty_slot")
-			inventory_row.add_child(empty_button)
-			_register_drop_target_tree(empty_button, inventory_destination)
+			if first_empty_slot < 0:
+				first_empty_slot = slot
 			continue
 		var item: Dictionary = item_value
 		var source := {"kind": "inventory", "slot": slot}
@@ -732,7 +729,7 @@ func _build_worker_and_inventory() -> void:
 		)
 		item_button.name = "SourceInventory_%d" % slot
 		item_button.tooltip_text = item_button.text.replace("\n", " · ")
-		item_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		item_button.custom_minimum_size = Vector2(44, 48)
 		_apply_button_style(item_button, "slot")
 		_decorate_item_button(
 			item_button,
@@ -740,7 +737,25 @@ func _build_worker_and_inventory() -> void:
 			"ItemIcon_%s" % item_button.name,
 			9
 		)
-		inventory_row.add_child(item_button)
+		dock_row.add_child(item_button)
+
+	# Empty inventory is represented by one compact bag target instead of four
+	# permanent blank slots. The destination still resolves to the first free
+	# simulator slot, so facility output remains fully draggable.
+	if first_empty_slot >= 0:
+		var inventory_destination := {"kind": "inventory", "slot": first_empty_slot}
+		var bag_button := _make_button(
+			"가방\n%d/%d" % [occupied_count, capacity],
+			Callable(self, "_emit_destination").bind(inventory_destination),
+			8
+		)
+		bag_button.name = "DropTargetInventory_%d" % first_empty_slot
+		bag_button.tooltip_text = "가방에 넣기 · %d칸 남음" % (capacity - occupied_count)
+		bag_button.custom_minimum_size = Vector2(52, 48)
+		bag_button.disabled = not _round_interactive
+		_apply_button_style(bag_button, "empty_slot")
+		dock_row.add_child(bag_button)
+		_register_drop_target_tree(bag_button, inventory_destination)
 
 	var delivery_button := _make_button(
 		"납품대",
@@ -749,7 +764,7 @@ func _build_worker_and_inventory() -> void:
 	)
 	delivery_button.name = "DropTargetDelivery"
 	delivery_button.tooltip_text = "완성 장비를 이곳에 놓으면 조건에 맞는 의뢰에 자동 납품합니다."
-	delivery_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	delivery_button.custom_minimum_size = Vector2(58, 48)
 	delivery_button.disabled = not _round_interactive
 	_apply_button_style(delivery_button, "delivery")
 	_decorate_button_with_texture(
@@ -758,7 +773,7 @@ func _build_worker_and_inventory() -> void:
 		"FacilityDropIcon_FAC_DELIVERY",
 		9
 	)
-	inventory_row.add_child(delivery_button)
+	dock_row.add_child(delivery_button)
 	_register_drop_target_tree(delivery_button, {"kind": "delivery"})
 
 
@@ -1447,7 +1462,7 @@ func _score_summary_text() -> String:
 
 func _worker_summary_text(idle_workers: int, total_workers: int) -> String:
 	var pips := "●".repeat(idle_workers) + "○".repeat(maxi(0, total_workers - idle_workers))
-	return "일꾼  %s  %d/%d 유휴  ·  가방" % [pips, idle_workers, total_workers]
+	return "일꾼 %s · %d/%d" % [pips, idle_workers, total_workers]
 
 
 func _item_name(item_id: String, enhancement_level: int) -> String:

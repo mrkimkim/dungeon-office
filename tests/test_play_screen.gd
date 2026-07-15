@@ -262,7 +262,16 @@ static func run(test: TestFramework) -> void:
 		true,
 		false
 	)
-	test.assert_equal(inventory_destinations.size(), 4, "play screen must show four real inventory slots")
+	test.assert_equal(
+		inventory_destinations.size(),
+		1,
+		"empty inventory must collapse into one compact bag destination"
+	)
+	test.assert_equal(
+		(screen.find_child("DropTargetInventory_0", true, false) as Button).text,
+		"가방\n0/4",
+		"the compact bag target must expose capacity without four blank slots"
+	)
 	test.assert_equal(
 		(screen.find_child("RequestItem_R1-E1", true, false) as Label).text,
 		"단검",
