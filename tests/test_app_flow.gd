@@ -155,6 +155,31 @@ static func run(test: TestFramework) -> void:
 		int(app._round_state.get("tick", -1)) - tick_before_hitch <= 5,
 		"an Android scheduler hitch cannot fast-forward more than 250ms"
 	)
+	var score_before_rejected_delivery := int(app._round_state.get("score", 0))
+	var deliveries_before_rejected_delivery: int = int(
+		app._round_state.get("deliveries", []).size()
+	)
+	test.assert_false(
+		app._attempt_item_transfer(
+			{"kind": "supply", "item_id": "MAT_IRON_ORE"},
+			{"kind": "delivery"}
+		),
+		"delivery rejects raw materials"
+	)
+	test.assert_equal(
+		int(app._round_state.get("score", 0)),
+		score_before_rejected_delivery,
+		"a rejected delivery cannot change score"
+	)
+	test.assert_equal(
+		app._round_state.get("deliveries", []).size(),
+		deliveries_before_rejected_delivery,
+		"a rejected delivery cannot record completion"
+	)
+	test.assert_true(
+		app._pending_play_effects.is_empty(),
+		"a rejected delivery cannot queue success feedback"
+	)
 
 	app._on_item_drop_requested(
 		{"kind": "supply", "item_id": "MAT_IRON_ORE"},
@@ -199,6 +224,26 @@ static func run(test: TestFramework) -> void:
 	test.assert_equal(int(app._round_state.get("score", 0)), 10, "direct R1 cycle awards score")
 	test.assert_equal(app._round_state.get("deliveries", []).size(), 1, "direct R1 cycle records delivery")
 	test.assert_true(app._selected_source.is_empty(), "atomic drops leave no stale tap selection")
+	test.assert_contains(app._feedback, "납품 완료", "delivery exposes a persistent success message")
+	test.assert_contains(app._feedback, "+10점", "delivery feedback connects success to awarded score")
+	var delivery_impact := app.find_child("DeliveryImpactLayer", true, false) as Control
+	test.assert_true(delivery_impact != null, "accepted delivery flushes its effect after the rebuilt play UI")
+	test.assert_equal(
+		str(delivery_impact.get_meta("event_id", "")),
+		"R1-E1",
+		"app forwards the simulator's matched request identity to the impact"
+	)
+	test.assert_equal(
+		int(delivery_impact.get_meta("score", 0)),
+		10,
+		"app forwards the exact awarded score to the impact"
+	)
+	test.assert_true(app._pending_play_effects.is_empty(), "render consumes each delivery effect exactly once")
+	test.assert_equal(
+		str(delivery_impact.get_meta("run_id", "")),
+		app._run_id,
+		"delivery effects are scoped to the active run"
+	)
 
 	var tick_before_pause := int(app._round_state.get("tick", -1))
 	app._pause_round()

@@ -13,6 +13,7 @@ signal recipe_requested(item_id: String, enhancement_level: int)
 signal start_requested(facility_id: String)
 signal store_requested(facility_id: String)
 signal pause_requested()
+signal drag_ended()
 
 const FACILITY_ORDER: Array[String] = [
 	"FAC_SUPPLY",
@@ -23,10 +24,15 @@ const FACILITY_ORDER: Array[String] = [
 	"FAC_ENHANCE_ANVIL",
 ]
 const MINIMUM_TAP_SIZE: Vector2 = Vector2(44, 44)
-const FACILITY_SPRITE_SIZE: int = 82
-const ITEM_ICON_SIZE: int = 34
+const FACILITY_SPRITE_SIZE: int = 58
+const FACILITY_ART_SLOT_HEIGHT: int = 60
+const ITEM_ICON_SIZE: int = 29
+const REQUEST_ICON_SIZE: int = 36
+const DELIVERY_ICON_SIZE: int = 42
 const DRAG_PREVIEW_ICON_SIZE: int = 44
-const FACILITY_GRID_HEIGHT: int = 294
+const FACILITY_CELL_HEIGHT: int = 156
+const ADJACENT_ACTION_GAP: int = 8
+const FACILITY_GRID_HEIGHT: int = FACILITY_CELL_HEIGHT * 2 + ADJACENT_ACTION_GAP
 const DRAG_PAYLOAD_TYPE: String = "dungeon_office/item_source_v1"
 
 var _catalog: Dictionary = {}
@@ -39,6 +45,10 @@ var _large_text_enabled: bool = false
 var _color_assist_enabled: bool = false
 var _structure_signature: String = ""
 var _drop_target_roots: Array[Control] = []
+var _delivery_target_tween: Tween
+var _score_pulse_tween: Tween
+var _delivery_effect_canvas: CanvasLayer
+var _delivery_effect_host: Control
 
 
 func _init() -> void:
@@ -98,11 +108,220 @@ func render(
 	_build_facilities()
 	_build_worker_and_inventory()
 	_update_dynamic_text(feedback)
+	if is_instance_valid(_delivery_effect_host):
+		var active_impact := _delivery_effect_host.find_child(
+			"DeliveryImpactLayer",
+			false,
+			false
+		) as Control
+		if active_impact != null:
+			_align_delivery_impact(active_impact)
+			if is_inside_tree():
+				call_deferred("_align_delivery_impact", active_impact)
+
+
+func play_delivery_impact(event: Dictionary) -> void:
+	var board := find_child("WorkshopBoard", true, false) as Control
+	if board == null:
+		return
+	var effect_host := _ensure_delivery_effect_host()
+	var previous := effect_host.find_child("DeliveryImpactLayer", false, false) as Control
+	if previous != null:
+		previous.free()
+
+	var layer := Control.new()
+	layer.name = "DeliveryImpactLayer"
+	layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layer.z_index = 50
+	layer.set_meta("event_id", str(event.get("event_id", "")))
+	layer.set_meta("score", int(event.get("score", 0)))
+	layer.set_meta("run_id", str(event.get("run_id", "")))
+	effect_host.add_child(layer)
+	_align_delivery_impact(layer)
+
+	var flash := ColorRect.new()
+	flash.name = "DeliveryImpactFlash"
+	flash.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	flash.color = Color(1.0, 0.72, 0.24, 0.0)
+	layer.add_child(flash)
+	flash.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+
+	var stamp := Label.new()
+	stamp.name = "DeliveryImpactStamp"
+	stamp.text = "납품 완료!"
+	stamp.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stamp.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	stamp.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	stamp.add_theme_font_size_override("font_size", _scaled_font_size(24))
+	stamp.add_theme_constant_override("outline_size", 5)
+	stamp.add_theme_color_override("font_outline_color", Color("4b2515"))
+	stamp.modulate = Color("ffe39a")
+	layer.add_child(stamp)
+	stamp.anchor_left = 0.5
+	stamp.anchor_top = 0.11
+	stamp.anchor_right = 0.5
+	stamp.anchor_bottom = 0.11
+	stamp.offset_left = -130.0
+	stamp.offset_top = -38.0
+	stamp.offset_right = 130.0
+	stamp.offset_bottom = 4.0
+
+	var score_pop := Label.new()
+	score_pop.name = "DeliveryImpactScore"
+	score_pop.text = "+%d점" % int(event.get("score", 0))
+	score_pop.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	score_pop.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	score_pop.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	score_pop.add_theme_font_size_override("font_size", _scaled_font_size(19))
+	score_pop.add_theme_constant_override("outline_size", 4)
+	score_pop.add_theme_color_override("font_outline_color", Color("173127"))
+	score_pop.modulate = Color("a8f0c7")
+	layer.add_child(score_pop)
+	score_pop.anchor_left = 0.5
+	score_pop.anchor_top = 0.11
+	score_pop.anchor_right = 0.5
+	score_pop.anchor_bottom = 0.11
+	score_pop.offset_left = -100.0
+	score_pop.offset_top = 3.0
+	score_pop.offset_right = 100.0
+	score_pop.offset_bottom = 37.0
+
+	if is_inside_tree():
+		call_deferred("_animate_delivery_impact", layer)
+
+
+func _ensure_delivery_effect_host() -> Control:
+	if is_instance_valid(_delivery_effect_host):
+		return _delivery_effect_host
+	_delivery_effect_canvas = CanvasLayer.new()
+	_delivery_effect_canvas.name = "DeliveryEffectCanvas"
+	_delivery_effect_canvas.layer = 20
+	add_child(_delivery_effect_canvas)
+	_delivery_effect_host = Control.new()
+	_delivery_effect_host.name = "DeliveryEffectHost"
+	_delivery_effect_host.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_delivery_effect_canvas.add_child(_delivery_effect_host)
+	_delivery_effect_host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	return _delivery_effect_host
+
+
+func _align_delivery_impact(layer: Control) -> void:
+	if not is_instance_valid(layer):
+		return
+	var board := find_child("WorkshopBoard", true, false) as Control
+	if board == null:
+		return
+	var board_rect := board.get_global_rect()
+	layer.position = board_rect.position
+	layer.size = board_rect.size
+
+
+func _animate_delivery_impact(layer: Control) -> void:
+	if not is_instance_valid(layer) or not is_inside_tree():
+		return
+	# Container geometry settles on the next frame after a structural render.
+	# Anchor and animate only after that boundary so pivots never use zero/stale rects.
+	await get_tree().process_frame
+	if not is_instance_valid(layer) or not is_inside_tree():
+		return
+	_align_delivery_impact(layer)
+	var flash := layer.find_child("DeliveryImpactFlash", false, false) as ColorRect
+	var stamp := layer.find_child("DeliveryImpactStamp", false, false) as Label
+	var score_pop := layer.find_child("DeliveryImpactScore", false, false) as Label
+	if flash == null or stamp == null or score_pop == null:
+		return
+
+	stamp.pivot_offset = stamp.size * 0.5
+	stamp.scale = Vector2(0.62, 0.62)
+	stamp.rotation = deg_to_rad(-4.0)
+	stamp.modulate.a = 0.0
+	score_pop.pivot_offset = score_pop.size * 0.5
+	score_pop.scale = Vector2(0.8, 0.8)
+	score_pop.position += Vector2(0.0, 10.0)
+	score_pop.modulate.a = 0.0
+
+	var flash_tween := create_tween()
+	flash_tween.bind_node(layer)
+	flash_tween.tween_property(flash, "color", Color(1.0, 0.72, 0.24, 0.2), 0.07)
+	flash_tween.tween_property(flash, "color", Color(1.0, 0.72, 0.24, 0.0), 0.24)
+
+	var intro_tween := create_tween()
+	intro_tween.bind_node(layer)
+	intro_tween.set_parallel(true)
+	intro_tween.tween_property(stamp, "scale", Vector2.ONE, 0.2).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	intro_tween.tween_property(stamp, "modulate:a", 1.0, 0.08)
+	intro_tween.tween_property(score_pop, "scale", Vector2.ONE, 0.18).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	intro_tween.tween_property(score_pop, "modulate:a", 1.0, 0.1)
+	intro_tween.tween_property(score_pop, "position", score_pop.position - Vector2(0.0, 18.0), 0.42).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+
+	var directions: Array[Vector2] = [
+		Vector2(-1.0, -0.35),
+		Vector2(-0.7, -0.8),
+		Vector2(-0.2, -1.0),
+		Vector2(0.35, -0.95),
+		Vector2(0.8, -0.65),
+		Vector2(1.0, -0.15),
+		Vector2(0.65, 0.45),
+		Vector2(-0.65, 0.45),
+	]
+	var burst_center := Vector2(layer.size.x * 0.5, layer.size.y * 0.11)
+	for index: int in range(directions.size()):
+		var spark := ColorRect.new()
+		spark.name = "DeliverySpark_%d" % index
+		spark.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		spark.color = Color("ffe08a") if index % 2 == 0 else Color("9ee7c3")
+		spark.size = Vector2(5.0, 5.0)
+		spark.position = burst_center - spark.size * 0.5
+		spark.rotation = float(index) * 0.45
+		layer.add_child(spark)
+		var spark_tween := create_tween()
+		spark_tween.bind_node(spark)
+		spark_tween.set_parallel(true)
+		spark_tween.tween_property(
+			spark,
+			"position",
+			spark.position + directions[index] * 58.0,
+			0.48
+		).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		spark_tween.tween_property(spark, "modulate:a", 0.0, 0.48).set_delay(0.12)
+
+	var delivery_button := find_child("DropTargetDelivery", true, false) as Control
+	if delivery_button != null:
+		if _delivery_target_tween != null and _delivery_target_tween.is_valid():
+			_delivery_target_tween.kill()
+		delivery_button.pivot_offset = delivery_button.size * 0.5
+		delivery_button.scale = Vector2.ONE
+		_delivery_target_tween = create_tween()
+		_delivery_target_tween.bind_node(delivery_button)
+		_delivery_target_tween.tween_property(delivery_button, "scale", Vector2(1.14, 1.14), 0.1).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		_delivery_target_tween.tween_property(delivery_button, "scale", Vector2(0.97, 0.97), 0.08)
+		_delivery_target_tween.tween_property(delivery_button, "scale", Vector2.ONE, 0.12)
+
+	var score_label := find_child("ScoreLabel", true, false) as Control
+	if score_label != null:
+		if _score_pulse_tween != null and _score_pulse_tween.is_valid():
+			_score_pulse_tween.kill()
+		score_label.pivot_offset = score_label.size * 0.5
+		score_label.scale = Vector2.ONE
+		_score_pulse_tween = create_tween()
+		_score_pulse_tween.bind_node(score_label)
+		_score_pulse_tween.tween_property(score_label, "scale", Vector2(1.1, 1.1), 0.1)
+		_score_pulse_tween.tween_property(score_label, "scale", Vector2.ONE, 0.18).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+	var outro_tween := create_tween()
+	outro_tween.bind_node(layer)
+	outro_tween.tween_interval(0.72)
+	outro_tween.tween_property(layer, "modulate:a", 0.0, 0.24)
+	outro_tween.tween_callback(Callable(layer, "queue_free"))
 
 
 func _clear() -> void:
 	_drop_target_roots.clear()
 	for child: Node in get_children():
+		# Keep delivery feedback alive while the state-driven HUD is rebuilt.
+		# The CanvasLayer is still freed together with this PlayScreen.
+		if child == _delivery_effect_canvas:
+			continue
 		remove_child(child)
 		child.queue_free()
 
@@ -119,6 +338,11 @@ func _notification(what: int) -> void:
 		_set_drop_target_highlights(get_viewport().gui_get_drag_data())
 	elif what == NOTIFICATION_DRAG_END:
 		_reset_drop_target_highlights()
+		drag_ended.emit()
+
+
+func is_drag_active() -> bool:
+	return _active_drag_data() is Dictionary
 
 
 func _active_drag_data() -> Variant:
@@ -202,7 +426,7 @@ func _update_dynamic_text(feedback: String) -> void:
 		feedback_label.text = feedback.strip_edges()
 	var waiting_label := find_child("WaitingRequestLabel", true, false) as Label
 	if waiting_label != null:
-		waiting_label.text = "+%d" % _round_state.get("waiting_requests", []).size()
+		waiting_label.text = "대기\n%d" % _round_state.get("waiting_requests", []).size()
 	for request_value: Variant in _round_state.get("active_requests", []):
 		var request: Dictionary = request_value
 		var request_timer := find_child(
@@ -320,10 +544,11 @@ func _build_feedback(feedback: String) -> void:
 func _build_requests() -> void:
 	var request_row := HBoxContainer.new()
 	request_row.name = "RequestTicketRow"
-	request_row.add_theme_constant_override("separation", 5)
+	request_row.add_theme_constant_override("separation", ADJACENT_ACTION_GAP)
 	request_row.custom_minimum_size = Vector2(0, 68)
 	add_child(request_row)
 	var active_requests: Array = _round_state.get("active_requests", [])
+	var compact_tickets := active_requests.size() >= 3
 	if active_requests.is_empty():
 		var empty_panel := _make_panel("request_empty")
 		empty_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -354,36 +579,42 @@ func _build_requests() -> void:
 		)
 		recipe_button.name = "RecipeButton_%s" % str(request.get("event_id", "unknown"))
 		recipe_button.tooltip_text = "%s 제작법 보기" % item_text
-		recipe_button.custom_minimum_size = Vector2(96, 68)
+		recipe_button.custom_minimum_size = Vector2(80 if compact_tickets else 96, 68)
 		recipe_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		recipe_button.clip_contents = true
+		recipe_button.clip_text = true
+		recipe_button.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		_apply_button_style(recipe_button, "request")
 		_hide_button_text(recipe_button)
 		request_row.add_child(recipe_button)
 
 		var margin := MarginContainer.new()
 		margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		margin.add_theme_constant_override("margin_left", 5)
+		margin.add_theme_constant_override("margin_left", 4 if compact_tickets else 7)
 		margin.add_theme_constant_override("margin_top", 4)
-		margin.add_theme_constant_override("margin_right", 5)
+		margin.add_theme_constant_override("margin_right", 4 if compact_tickets else 7)
 		margin.add_theme_constant_override("margin_bottom", 4)
 		recipe_button.add_child(margin)
 		margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		var request_content := HBoxContainer.new()
+		request_content.name = "RequestContent_%s" % str(request.get("event_id", "unknown"))
 		request_content.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		request_content.add_theme_constant_override("separation", 3)
+		request_content.alignment = BoxContainer.ALIGNMENT_CENTER
+		request_content.add_theme_constant_override("separation", 4 if compact_tickets else 6)
 		margin.add_child(request_content)
 		var request_icon := _make_texture_decoration(
 			VisualCatalogScript.item_texture(str(request.get("item_id", ""))),
-			ITEM_ICON_SIZE,
+			28 if compact_tickets else REQUEST_ICON_SIZE,
 			1.0
 		)
 		if request_icon != null:
 			request_icon.name = "RequestIcon_%s" % str(request.get("event_id", "unknown"))
 			request_content.add_child(request_icon)
 		var request_box := VBoxContainer.new()
+		request_box.name = "RequestTextStack_%s" % str(request.get("event_id", "unknown"))
 		request_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		request_box.add_theme_constant_override("separation", 0)
+		request_box.alignment = BoxContainer.ALIGNMENT_CENTER
+		request_box.add_theme_constant_override("separation", 1)
 		request_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		request_content.add_child(request_box)
 		var request_definition := _find_entry(
@@ -391,14 +622,26 @@ func _build_requests() -> void:
 			str(request.get("request_id", ""))
 		)
 		var forecast := bool(request_definition.get("forecast", false))
+		var request_display_text := item_text
+		var required_level := int(request.get("required_level", 0))
+		if compact_tickets and required_level > 0:
+			# Put the required enhancement first so compact ellipsis can never hide it.
+			request_display_text = "+%d %s" % [
+				required_level,
+				_item_name(str(request.get("item_id", "")), 0),
+			]
+		var forecast_prefix := ""
+		if forecast:
+			forecast_prefix = "예·" if compact_tickets else "[예고] "
 		var request_item := _add_label(
 			request_box,
-			("[예고] " if forecast else "") + item_text,
-			10,
+			forecast_prefix + request_display_text,
+			9 if compact_tickets else 10,
 			Color("3c2a22"),
 			HORIZONTAL_ALIGNMENT_LEFT
 		)
 		request_item.name = "RequestItem_%s" % str(request.get("event_id", "unknown"))
+		request_item.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		request_item.max_lines_visible = 1
 		request_item.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		var patience_seconds := ceili(
@@ -407,31 +650,37 @@ func _build_requests() -> void:
 		var request_timer := _add_label(
 			request_box,
 			"%d점 · %d초" % [int(request.get("score", 0)), patience_seconds],
-			9,
+			8 if compact_tickets else 9,
 			Color("71523b"),
 			HORIZONTAL_ALIGNMENT_LEFT
 		)
 		request_timer.name = "RequestTimer_%s" % str(request.get("event_id", "unknown"))
+		request_timer.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		var guide_hint := _add_label(
 			request_box,
 			"제작법  ›",
-			8,
+			7 if compact_tickets else 8,
 			Color("a4572f"),
 			HORIZONTAL_ALIGNMENT_LEFT
 		)
 		guide_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		guide_hint.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 
 	var waiting_count := int(_round_state.get("waiting_requests", []).size())
 	if waiting_count > 0:
+		var waiting_panel := _make_panel("request_waiting")
+		waiting_panel.name = "WaitingRequestPanel"
+		waiting_panel.custom_minimum_size = Vector2(44 if compact_tickets else 48, 68)
+		request_row.add_child(waiting_panel)
 		var waiting_label := _add_label(
-			request_row,
-			"+%d" % waiting_count,
-			10,
+			waiting_panel,
+			"대기\n%d" % waiting_count,
+			7 if compact_tickets else 8,
 			Color("d9c8ae"),
 			HORIZONTAL_ALIGNMENT_CENTER
 		)
 		waiting_label.name = "WaitingRequestLabel"
-		waiting_label.custom_minimum_size = Vector2(24, 68)
+		waiting_label.custom_minimum_size = Vector2(0, 60)
 		waiting_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 
 
@@ -460,11 +709,11 @@ func _build_facilities() -> void:
 	var grid := GridContainer.new()
 	grid.name = "FacilityGrid"
 	grid.columns = 3
-	grid.custom_minimum_size = Vector2(326, FACILITY_GRID_HEIGHT)
+	grid.custom_minimum_size = Vector2(328, FACILITY_GRID_HEIGHT)
 	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	grid.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	grid.add_theme_constant_override("h_separation", 5)
-	grid.add_theme_constant_override("v_separation", 5)
+	grid.add_theme_constant_override("h_separation", ADJACENT_ACTION_GAP)
+	grid.add_theme_constant_override("v_separation", ADJACENT_ACTION_GAP)
 	center.add_child(grid)
 
 	for facility_id: String in FACILITY_ORDER:
@@ -478,12 +727,11 @@ func _build_facility_cell(parent: Container, facility_id: String) -> void:
 	)
 	var panel := _make_panel("facility" if installed else "facility_locked")
 	panel.name = "FacilityCell_%s" % facility_id
-	panel.custom_minimum_size = Vector2(104, 142)
+	panel.custom_minimum_size = Vector2(104, FACILITY_CELL_HEIGHT)
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	panel.clip_contents = true
 	parent.add_child(panel)
-	_add_facility_sprite(panel, facility_id)
 
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 1)
@@ -496,7 +744,8 @@ func _build_facility_cell(parent: Container, facility_id: String) -> void:
 		HORIZONTAL_ALIGNMENT_CENTER
 	)
 	facility_name_label.name = "FacilityName_%s" % facility_id
-	facility_name_label.custom_minimum_size = Vector2(0, 17)
+	facility_name_label.custom_minimum_size = Vector2(0, 18)
+	facility_name_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	facility_name_label.autowrap_mode = TextServer.AUTOWRAP_OFF
 	facility_name_label.max_lines_visible = 1
 	facility_name_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
@@ -504,9 +753,14 @@ func _build_facility_cell(parent: Container, facility_id: String) -> void:
 	facility_name_label.add_theme_color_override("font_outline_color", Color("201719"))
 
 	if facility_id == "FAC_SUPPLY":
+		# Three or more supplies need two full tap-target rows. In that dense state
+		# the decorative cabinet yields its slot to controls instead of clipping them.
+		if _round_definition.get("supply_items", []).size() <= 2:
+			_add_facility_sprite(box, facility_id)
 		_build_supply_cell(box)
 		return
 	if facility_id == "FAC_TRASH":
+		_add_facility_sprite(box, facility_id)
 		var trash_spacer := Control.new()
 		trash_spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		box.add_child(trash_spacer)
@@ -517,7 +771,8 @@ func _build_facility_cell(parent: Container, facility_id: String) -> void:
 			Color("c4a898"),
 			HORIZONTAL_ALIGNMENT_CENTER
 		)
-		trash_hint.custom_minimum_size = Vector2(0, 22)
+		trash_hint.custom_minimum_size = Vector2(0, 48)
+		trash_hint.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		var trash_destination := {"kind": "trash"}
 		_register_tappable_destination(panel, trash_destination)
 		_register_drop_target_tree(panel, trash_destination)
@@ -525,6 +780,7 @@ func _build_facility_cell(parent: Container, facility_id: String) -> void:
 
 	var facilities: Dictionary = _round_state.get("facilities", {})
 	if not facilities.has(facility_id):
+		_add_facility_sprite(box, facility_id)
 		var locked_spacer := Control.new()
 		locked_spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		box.add_child(locked_spacer)
@@ -533,6 +789,11 @@ func _build_facility_cell(parent: Container, facility_id: String) -> void:
 
 	var facility: Dictionary = facilities[facility_id]
 	var status := str(facility.get("status", "empty"))
+	var needs_separate_start: bool = (
+		status == "ready" and facility.get("inputs", []).size() > 1
+	)
+	if not needs_separate_start:
+		_add_facility_sprite(box, facility_id)
 	var status_label := _add_label(
 		box,
 		_facility_status_text(facility),
@@ -541,7 +802,8 @@ func _build_facility_cell(parent: Container, facility_id: String) -> void:
 		HORIZONTAL_ALIGNMENT_CENTER
 	)
 	status_label.name = "FacilityStatus_%s" % facility_id
-	status_label.custom_minimum_size = Vector2(0, 16)
+	status_label.custom_minimum_size = Vector2(0, 18)
+	status_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	status_label.autowrap_mode = TextServer.AUTOWRAP_OFF
 	status_label.max_lines_visible = 1
 	status_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
@@ -550,10 +812,21 @@ func _build_facility_cell(parent: Container, facility_id: String) -> void:
 	content_spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	box.add_child(content_spacer)
 
-	var item_row := HBoxContainer.new()
-	item_row.add_theme_constant_override("separation", 3)
-	item_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	box.add_child(item_row)
+	var has_output: bool = status == "output" and facility.get("output") is Dictionary
+	var needs_action_row: bool = (
+		not facility.get("inputs", []).is_empty()
+		or has_output
+		or status == "ready"
+	)
+	var item_row: HBoxContainer = null
+	if needs_action_row:
+		item_row = HBoxContainer.new()
+		item_row.name = "FacilityActionRow_%s" % facility_id
+		item_row.alignment = BoxContainer.ALIGNMENT_CENTER
+		item_row.add_theme_constant_override("separation", ADJACENT_ACTION_GAP)
+		item_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		item_row.custom_minimum_size = Vector2(0, 48)
+		box.add_child(item_row)
 	for input_index: int in range(facility.get("inputs", []).size()):
 		var input_item: Dictionary = facility["inputs"][input_index]
 		var input_source := {
@@ -570,6 +843,8 @@ func _build_facility_cell(parent: Container, facility_id: String) -> void:
 			9
 		)
 		input_button.name = "SourceInput_%s_%d" % [facility_id, input_index]
+		input_button.custom_minimum_size = Vector2(44, 48)
+		input_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		_apply_button_style(input_button, "slot")
 		_decorate_item_button(
 			input_button,
@@ -580,7 +855,7 @@ func _build_facility_cell(parent: Container, facility_id: String) -> void:
 		input_button.tooltip_text = input_button.text
 		item_row.add_child(input_button)
 
-	if status == "output" and facility.get("output") is Dictionary:
+	if has_output:
 		var output: Dictionary = facility["output"]
 		var output_source := {"kind": "facility_output", "facility_id": facility_id}
 		var output_button := _make_source_button(
@@ -592,6 +867,8 @@ func _build_facility_cell(parent: Container, facility_id: String) -> void:
 			9
 		)
 		output_button.name = "SourceOutput_%s" % facility_id
+		output_button.custom_minimum_size = Vector2(44, 48)
+		output_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		_apply_button_style(output_button, "complete_slot")
 		_decorate_item_button(
 			output_button,
@@ -602,28 +879,42 @@ func _build_facility_cell(parent: Container, facility_id: String) -> void:
 		output_button.tooltip_text = output_button.text
 		item_row.add_child(output_button)
 
-	if status == "ready":
+	if status == "ready" and facility.get("inputs", []).size() <= 1:
 		var start_button := _make_button(
-			"▶  시작",
+			"시작",
 			Callable(self, "_emit_start").bind(facility_id),
-			9
+			8
 		)
 		start_button.name = "Start_%s" % facility_id
-		start_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		start_button.custom_minimum_size = Vector2(44, 48)
+		start_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		start_button.disabled = not _facility_command_available(facility_id, "can_start")
+		_apply_button_style(start_button, "primary")
+		item_row.add_child(start_button)
+	elif status == "ready":
+		var start_button := _make_button(
+			"시작",
+			Callable(self, "_emit_start").bind(facility_id),
+			8
+		)
+		start_button.name = "Start_%s" % facility_id
+		start_button.custom_minimum_size = Vector2(64, 44)
+		start_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		start_button.disabled = not _facility_command_available(facility_id, "can_start")
 		_apply_button_style(start_button, "primary")
 		box.add_child(start_button)
 	elif status == "output":
 		var store_button := _make_button(
-			"✓  수납",
+			"수납",
 			Callable(self, "_emit_store").bind(facility_id),
-			9
+			8
 		)
 		store_button.name = "Store_%s" % facility_id
-		store_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		store_button.custom_minimum_size = Vector2(44, 48)
+		store_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		store_button.disabled = not _facility_command_available(facility_id, "can_store")
 		_apply_button_style(store_button, "success")
-		box.add_child(store_button)
+		item_row.add_child(store_button)
 	elif facility.get("inputs", []).is_empty() and status not in ["working", "output"]:
 		var drop_hint := _add_label(
 			box,
@@ -632,7 +923,8 @@ func _build_facility_cell(parent: Container, facility_id: String) -> void:
 			Color("bfae92"),
 			HORIZONTAL_ALIGNMENT_CENTER
 		)
-		drop_hint.custom_minimum_size = Vector2(0, 22)
+		drop_hint.custom_minimum_size = Vector2(0, 48)
+		drop_hint.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 
 	var destination := {
 		"kind": "facility_input",
@@ -649,8 +941,8 @@ func _build_supply_cell(parent: VBoxContainer) -> void:
 	var supply_grid := GridContainer.new()
 	supply_grid.columns = 2
 	supply_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	supply_grid.add_theme_constant_override("h_separation", 3)
-	supply_grid.add_theme_constant_override("v_separation", 3)
+	supply_grid.add_theme_constant_override("h_separation", ADJACENT_ACTION_GAP)
+	supply_grid.add_theme_constant_override("v_separation", ADJACENT_ACTION_GAP)
 	parent.add_child(supply_grid)
 	for item_id_value: Variant in _round_definition.get("supply_items", []):
 		var item_id := str(item_id_value)
@@ -671,41 +963,45 @@ func _build_supply_cell(parent: VBoxContainer) -> void:
 func _build_worker_and_inventory() -> void:
 	var dock := _make_panel("inventory")
 	dock.name = "InventoryDock"
-	dock.custom_minimum_size = Vector2(0, 58)
+	dock.custom_minimum_size = Vector2(0, 82)
 	dock.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	add_child(dock)
 
-	var dock_row := HBoxContainer.new()
-	dock_row.add_theme_constant_override("separation", 4)
-	dock.add_child(dock_row)
+	var dock_stack := VBoxContainer.new()
+	dock_stack.name = "InventoryDockStack"
+	dock_stack.add_theme_constant_override("separation", 2)
+	dock.add_child(dock_stack)
 
 	var workers: Array = _round_state.get("workers", [])
 	var idle_workers := 0
 	for worker_value: Variant in workers:
 		if str(worker_value.get("facility_id", "")).is_empty():
 			idle_workers += 1
-	var inventory: Array = _round_state.get("inventory", [])
-	var capacity := int(_round_definition.get("inventory_capacity", inventory.size()))
-	var occupied_count := 0
-	for item_value: Variant in inventory:
-		if item_value != null:
-			occupied_count += 1
-
-	var dock_status := VBoxContainer.new()
-	dock_status.custom_minimum_size = Vector2(68, 48)
-	dock_status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	dock_status.alignment = BoxContainer.ALIGNMENT_CENTER
-	dock_status.add_theme_constant_override("separation", 0)
-	dock_row.add_child(dock_status)
 	var worker_label := _add_label(
-		dock_status,
+		dock_stack,
 		_worker_summary_text(idle_workers, workers.size()),
 		8,
 		Color("d8c7aa"),
 		HORIZONTAL_ALIGNMENT_LEFT
 	)
 	worker_label.name = "WorkerStatusLabel"
-	worker_label.custom_minimum_size = Vector2(0, 20)
+	worker_label.custom_minimum_size = Vector2(0, 14)
+	worker_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	worker_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+
+	var dock_row := HBoxContainer.new()
+	dock_row.name = "InventoryActionRow"
+	dock_row.custom_minimum_size = Vector2(0, 60)
+	dock_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	dock_row.add_theme_constant_override("separation", ADJACENT_ACTION_GAP)
+	dock_stack.add_child(dock_row)
+
+	var inventory: Array = _round_state.get("inventory", [])
+	var capacity := int(_round_definition.get("inventory_capacity", inventory.size()))
+	var occupied_count := 0
+	for item_value: Variant in inventory:
+		if item_value != null:
+			occupied_count += 1
 
 	var first_empty_slot := -1
 	for slot: int in range(capacity):
@@ -729,7 +1025,8 @@ func _build_worker_and_inventory() -> void:
 		)
 		item_button.name = "SourceInventory_%d" % slot
 		item_button.tooltip_text = item_button.text.replace("\n", " · ")
-		item_button.custom_minimum_size = Vector2(44, 48)
+		item_button.custom_minimum_size = Vector2(48, 52)
+		item_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		_apply_button_style(item_button, "slot")
 		_decorate_item_button(
 			item_button,
@@ -738,6 +1035,12 @@ func _build_worker_and_inventory() -> void:
 			9
 		)
 		dock_row.add_child(item_button)
+
+	var dock_spacer := Control.new()
+	dock_spacer.name = "InventoryDockSpacer"
+	dock_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	dock_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	dock_row.add_child(dock_spacer)
 
 	# Empty inventory is represented by one compact bag target instead of four
 	# permanent blank slots. The destination still resolves to the first free
@@ -751,7 +1054,8 @@ func _build_worker_and_inventory() -> void:
 		)
 		bag_button.name = "DropTargetInventory_%d" % first_empty_slot
 		bag_button.tooltip_text = "가방에 넣기 · %d칸 남음" % (capacity - occupied_count)
-		bag_button.custom_minimum_size = Vector2(52, 48)
+		bag_button.custom_minimum_size = Vector2(50, 52)
+		bag_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		bag_button.disabled = not _round_interactive
 		_apply_button_style(bag_button, "empty_slot")
 		dock_row.add_child(bag_button)
@@ -764,20 +1068,23 @@ func _build_worker_and_inventory() -> void:
 	)
 	delivery_button.name = "DropTargetDelivery"
 	delivery_button.tooltip_text = "완성 장비를 이곳에 놓으면 조건에 맞는 의뢰에 자동 납품합니다."
-	delivery_button.custom_minimum_size = Vector2(58, 48)
+	delivery_button.custom_minimum_size = Vector2(92, 60)
+	delivery_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	delivery_button.disabled = not _round_interactive
 	_apply_button_style(delivery_button, "delivery")
 	_decorate_button_with_texture(
 		delivery_button,
 		VisualCatalogScript.facility_texture("FAC_DELIVERY"),
 		"FacilityDropIcon_FAC_DELIVERY",
-		9
+		9,
+		DELIVERY_ICON_SIZE,
+		2
 	)
 	dock_row.add_child(delivery_button)
 	_register_drop_target_tree(delivery_button, {"kind": "delivery"})
 
 
-func _add_facility_sprite(panel: PanelContainer, facility_id: String) -> void:
+func _add_facility_sprite(parent: Container, facility_id: String) -> void:
 	var texture := VisualCatalogScript.facility_texture(facility_id)
 	if texture == null:
 		return
@@ -788,9 +1095,10 @@ func _add_facility_sprite(panel: PanelContainer, facility_id: String) -> void:
 	var layer := CenterContainer.new()
 	layer.name = "FacilityArtLayer_%s" % facility_id
 	layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layer.custom_minimum_size = Vector2(0, FACILITY_ART_SLOT_HEIGHT)
 	layer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	layer.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	panel.add_child(layer)
+	layer.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	parent.add_child(layer)
 	var sprite := _make_texture_decoration(
 		texture,
 		FACILITY_SPRITE_SIZE,
@@ -820,45 +1128,62 @@ func _decorate_button_with_texture(
 	button: Button,
 	texture: Texture2D,
 	icon_name: String,
-	font_size: int
+	font_size: int,
+	icon_size: int = ITEM_ICON_SIZE,
+	visual_separation: int = 1
 ) -> void:
 	if texture == null:
 		return
 	button.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	button.clip_text = true
+	button.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	var visible_text := button.text
-	var icon := _make_texture_decoration(texture, ITEM_ICON_SIZE, 1.0)
+	var visual_margin := MarginContainer.new()
+	visual_margin.name = "VisualLayout_%s" % icon_name
+	visual_margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	visual_margin.add_theme_constant_override("margin_left", 1)
+	visual_margin.add_theme_constant_override("margin_top", 1)
+	visual_margin.add_theme_constant_override("margin_right", 1)
+	visual_margin.add_theme_constant_override("margin_bottom", 1)
+	button.add_child(visual_margin)
+	visual_margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+
+	var visual_stack := VBoxContainer.new()
+	visual_stack.name = "VisualStack_%s" % icon_name
+	visual_stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	visual_stack.alignment = BoxContainer.ALIGNMENT_CENTER
+	visual_stack.add_theme_constant_override("separation", visual_separation)
+	visual_margin.add_child(visual_stack)
+
+	var icon := _make_texture_decoration(texture, icon_size, 1.0)
 	if icon == null:
+		visual_margin.queue_free()
 		return
 	icon.name = icon_name
-	button.add_child(icon)
-	icon.anchor_left = 0.5
-	icon.anchor_top = 0.5
-	icon.anchor_right = 0.5
-	icon.anchor_bottom = 0.5
-	icon.offset_left = -float(ITEM_ICON_SIZE) / 2.0
-	icon.offset_top = -float(ITEM_ICON_SIZE) / 2.0
-	icon.offset_right = float(ITEM_ICON_SIZE) / 2.0
-	icon.offset_bottom = float(ITEM_ICON_SIZE) / 2.0
+	icon.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	visual_stack.add_child(icon)
 
-	# Keep Button.text as the semantic/test contract while drawing an outlined copy
-	# above the decorative icon. This avoids changing minimum widths in the dense
-	# 3x2 mobile grid and keeps disabled buttons visibly disabled.
+	# Button.text stays as the semantic/test contract. The visible copy lives in a
+	# real vertical stack so the icon and caption never occupy the same pixels.
 	_hide_button_text(button)
 	var text_overlay := Label.new()
 	text_overlay.name = "%s_Text" % icon_name
 	text_overlay.text = _button_caption(visible_text)
 	text_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	text_overlay.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	text_overlay.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	text_overlay.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	text_overlay.autowrap_mode = TextServer.AUTOWRAP_OFF
 	text_overlay.max_lines_visible = 1
 	text_overlay.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	text_overlay.add_theme_font_size_override("font_size", _scaled_font_size(mini(font_size, 8)))
+	text_overlay.custom_minimum_size = Vector2(0, 11)
+	text_overlay.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	text_overlay.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	text_overlay.add_theme_constant_override("outline_size", 2)
 	text_overlay.add_theme_color_override("font_outline_color", Color("241c19"))
 	text_overlay.modulate = Color("91877a") if button.disabled else Color("f4e7d0")
-	button.add_child(text_overlay)
-	text_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	visual_stack.add_child(text_overlay)
 	if button.text.begins_with("● ") or button.text.begins_with("▣ "):
 		var selected_cue := Label.new()
 		selected_cue.name = "SelectedCue_%s" % icon_name
@@ -1026,7 +1351,7 @@ func _make_drag_preview(item: Dictionary) -> Control:
 	panel.custom_minimum_size = Vector2(140, 48)
 	var row := HBoxContainer.new()
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	row.add_theme_constant_override("separation", 4)
+	row.add_theme_constant_override("separation", ADJACENT_ACTION_GAP)
 	panel.add_child(row)
 	var item_id := str(item.get("item_id", ""))
 	var icon := _make_texture_decoration(
@@ -1129,6 +1454,8 @@ func _make_panel(kind: String = "default") -> PanelContainer:
 			style = _play_style_box(Color("242029"), Color("514451"), 12, 1, 5)
 		"request_empty":
 			style = _play_style_box(Color("252129"), Color("49404a"), 11, 1, 6)
+		"request_waiting":
+			style = _play_style_box(Color("302833"), Color("80654d"), 11, 1, 3)
 		_:
 			style = _play_style_box(Color("2b2530"), Color("625160"), 10, 2, 5)
 	panel.add_theme_stylebox_override("panel", style)

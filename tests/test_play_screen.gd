@@ -62,7 +62,18 @@ static func run(test: TestFramework) -> void:
 			"deadline_ticks": 1800,
 			"score": 10,
 			"deliveries": [],
-			"waiting_requests": [],
+			"waiting_requests": [{
+				"event_id": "R1-E2",
+				"request_id": "REQ_DAGGER_STD",
+				"item_id": "EQ_DAGGER",
+				"required_level": 0,
+				"score": 10,
+				"patience_ticks": 400,
+				"remaining_patience_ticks": 400,
+				"release_tick": 20,
+				"activated_tick": -1,
+				"urgent_emitted": false,
+			}],
 			"active_requests": [{
 				"event_id": "R1-E1",
 				"request_id": "REQ_DAGGER_STD",
@@ -203,10 +214,15 @@ static func run(test: TestFramework) -> void:
 		false
 	) as TextureRect
 	test.assert_true(
-		furnace_sprite.custom_minimum_size.x >= 72.0
-		and furnace_sprite.custom_minimum_size.x <= 96.0
+		furnace_sprite.custom_minimum_size.x >= 56.0
+		and furnace_sprite.custom_minimum_size.x <= 68.0
 		and furnace_sprite.custom_minimum_size.y == furnace_sprite.custom_minimum_size.x,
-		"facility artwork stays prominent and square within the mobile workbench"
+		"facility artwork stays prominent, square, and inside its dedicated layout row"
+	)
+	test.assert_equal(
+		furnace_sprite.get_parent().name,
+		"FacilityArtLayer_FAC_FURNACE",
+		"facility art must occupy its own row instead of overlapping status text"
 	)
 	for decoration_value: Variant in screen.find_children("*", "TextureRect", true, false):
 		var decoration: TextureRect = decoration_value
@@ -241,6 +257,10 @@ static func run(test: TestFramework) -> void:
 			Color.TRANSPARENT,
 			"decorated buttons must not draw native text over their icon: %s" % decorated_button_name
 		)
+		test.assert_true(
+			decorated_button.clip_text,
+			"semantic button text must not expand compact decorated controls: %s" % decorated_button_name
+		)
 	test.assert_true(
 		screen.find_child("SelectedCue_ItemIcon_SourceSupply_MAT_IRON_ORE", true, false) != null,
 		"a selected decorated source must retain a non-color shape cue"
@@ -255,6 +275,91 @@ static func run(test: TestFramework) -> void:
 		"납품대",
 		"delivery artwork must not replace the existing action text"
 	)
+	var delivery_button := screen.find_child("DropTargetDelivery", true, false) as Button
+	var bag_button := screen.find_child("DropTargetInventory_0", true, false) as Button
+	test.assert_true(
+		delivery_button.custom_minimum_size.x >= 88.0
+		and delivery_button.custom_minimum_size.y >= 56.0,
+		"delivery must read as the primary dock target"
+	)
+	test.assert_true(
+		delivery_button.custom_minimum_size.x >= bag_button.custom_minimum_size.x + 24.0,
+		"delivery must be visibly wider than the compact bag target"
+	)
+	var delivery_icon := screen.find_child(
+		"FacilityDropIcon_FAC_DELIVERY",
+		true,
+		false
+	) as TextureRect
+	test.assert_true(
+		delivery_icon.custom_minimum_size.x >= 40.0
+		and delivery_icon.custom_minimum_size.y == delivery_icon.custom_minimum_size.x,
+		"delivery receives a dedicated prominent square icon"
+	)
+	var store_button := screen.find_child("Store_FAC_FURNACE", true, false) as Button
+	test.assert_true(
+		store_button.custom_minimum_size.x >= 44.0
+		and store_button.custom_minimum_size.x <= 76.0
+		and store_button.custom_minimum_size.y >= 44.0
+		and store_button.custom_minimum_size.y <= 48.0,
+		"store stays compact while preserving its accessible tap target"
+	)
+	test.assert_false(
+		bool(store_button.size_flags_horizontal & Control.SIZE_EXPAND),
+		"store must not stretch into a full-width facility block"
+	)
+	var request_content := screen.find_child("RequestContent_R1-E1", true, false) as HBoxContainer
+	var request_stack := screen.find_child("RequestTextStack_R1-E1", true, false) as VBoxContainer
+	test.assert_equal(
+		request_content.get_theme_constant("separation"),
+		6,
+		"request artwork and text keep an explicit readable gap"
+	)
+	test.assert_equal(
+		request_stack.alignment,
+		BoxContainer.ALIGNMENT_CENTER,
+		"request copy is vertically centered beside its artwork"
+	)
+	test.assert_equal(
+		(screen.find_child("WaitingRequestLabel", true, false) as Label).text,
+		"대기\n1",
+		"queued requests use a labeled badge instead of an unexplained +1"
+	)
+	for spaced_container_name: String in [
+		"FacilityGrid",
+		"FacilityActionRow_FAC_FURNACE",
+		"InventoryActionRow",
+	]:
+		var spaced_container := screen.find_child(
+			spaced_container_name,
+			true,
+			false
+		) as Container
+		test.assert_true(
+			spaced_container.get_theme_constant("separation") >= 8
+			or spaced_container.get_theme_constant("h_separation") >= 8,
+			"adjacent tap targets keep an 8px gap: %s" % spaced_container_name
+		)
+	for aligned_label_name: String in [
+		"FacilityName_FAC_FURNACE",
+		"FacilityStatus_FAC_FURNACE",
+		"WorkerStatusLabel",
+	]:
+		test.assert_equal(
+			(screen.find_child(aligned_label_name, true, false) as Label).vertical_alignment,
+			VERTICAL_ALIGNMENT_CENTER,
+			"fixed-height text must be vertically centered: %s" % aligned_label_name
+		)
+	for visual_stack_name: String in [
+		"VisualStack_ItemIcon_SourceSupply_MAT_IRON_ORE",
+		"VisualStack_ItemIcon_SourceOutput_FAC_FURNACE",
+		"VisualStack_FacilityDropIcon_FAC_DELIVERY",
+	]:
+		var visual_stack := screen.find_child(visual_stack_name, true, false) as VBoxContainer
+		test.assert_true(
+			visual_stack != null and visual_stack.get_child_count() == 2,
+			"decorated buttons separate artwork and caption into two layout rows: %s" % visual_stack_name
+		)
 
 	var inventory_destinations := screen.find_children(
 		"DropTargetInventory_*",
@@ -271,6 +376,59 @@ static func run(test: TestFramework) -> void:
 		(screen.find_child("DropTargetInventory_0", true, false) as Button).text,
 		"가방\n0/4",
 		"the compact bag target must expose capacity without four blank slots"
+	)
+
+	screen.play_delivery_impact({"event_id": "R1-E1", "score": 10})
+	var impact_layer := screen.find_child("DeliveryImpactLayer", true, false) as Control
+	test.assert_true(impact_layer != null, "a successful delivery creates one visual impact layer")
+	test.assert_equal(
+		str(impact_layer.get_meta("event_id", "")),
+		"R1-E1",
+		"delivery impact retains the matched request identity"
+	)
+	test.assert_equal(
+		(screen.find_child("DeliveryImpactScore", true, false) as Label).text,
+		"+10점",
+		"delivery impact names the awarded score"
+	)
+	test.assert_equal(
+		(screen.find_child("DeliveryImpactStamp", true, false) as Label).text,
+		"납품 완료!",
+		"delivery impact contains a non-color completion stamp"
+	)
+	for impact_control_value: Variant in impact_layer.find_children("*", "Control", true, false):
+		var impact_control := impact_control_value as Control
+		test.assert_equal(
+			impact_control.mouse_filter,
+			Control.MOUSE_FILTER_IGNORE,
+			"delivery impact must never block play input: %s" % impact_control.name
+		)
+	screen.play_delivery_impact({"event_id": "R1-E2", "score": 20})
+	var impact_layers := screen.find_children("DeliveryImpactLayer", "Control", true, false)
+	test.assert_equal(impact_layers.size(), 1, "repeated deliveries replace rather than stack impact layers")
+	test.assert_equal(
+		int((impact_layers[0] as Control).get_meta("score", 0)),
+		20,
+		"a repeated delivery refreshes impact with the latest score"
+	)
+	screen._structure_signature = ""
+	screen.render(
+		screen._round_definition,
+		screen._round_state,
+		screen._catalog,
+		selected_source,
+		"HUD 재구성 테스트"
+	)
+	impact_layers = screen.find_children("DeliveryImpactLayer", "Control", true, false)
+	test.assert_equal(
+		impact_layers.size(),
+		1,
+		"HUD rebuilds must not cut a delivery impact short"
+	)
+	test.assert_equal(
+		(impact_layers[0] as Control).get_parent().name,
+		"DeliveryEffectHost",
+		"delivery impact lives on the persistent non-interactive overlay"
 	)
 	test.assert_equal(
 		(screen.find_child("RequestItem_R1-E1", true, false) as Label).text,
@@ -605,6 +763,109 @@ static func run(test: TestFramework) -> void:
 			{"kind": "inventory", "slot": 1}
 		),
 		"paused play rejects an otherwise legal drop"
+	)
+
+	var full_inventory_state: Dictionary = delivery_state.duplicate(true)
+	full_inventory_state["paused"] = false
+	full_inventory_state["inventory"] = [
+		{"item_id": "EQ_DAGGER", "enhancement_level": 0},
+		{"item_id": "MAT_IRON_INGOT", "enhancement_level": 0},
+		{"item_id": "MAT_IRON_INGOT", "enhancement_level": 0},
+		{"item_id": "MAT_IRON_INGOT", "enhancement_level": 0},
+	]
+	screen.set_display_options({"large_text_enabled": true})
+	screen.render(
+		screen._round_definition,
+		full_inventory_state,
+		screen._catalog,
+		{},
+		"큰 글씨 · 가득 찬 가방"
+	)
+	test.assert_equal(
+		screen.find_children("SourceInventory_*", "Button", true, false).size(),
+		4,
+		"large-text mode keeps every occupied inventory source"
+	)
+	test.assert_true(
+		screen.find_children("DropTargetInventory_*", "Button", true, false).is_empty(),
+		"a full inventory does not create a misleading empty bag target"
+	)
+	var large_delivery_caption := screen.find_child(
+		"FacilityDropIcon_FAC_DELIVERY_Text",
+		true,
+		false
+	) as Label
+	test.assert_equal(
+		large_delivery_caption.max_lines_visible,
+		1,
+		"large-text delivery caption stays on one dedicated row"
+	)
+	test.assert_true(
+		(screen.find_child("DropTargetDelivery", true, false) as Button).custom_minimum_size.x >= 88.0,
+		"large-text mode preserves the prominent delivery target"
+	)
+
+	var dense_round_definition: Dictionary = screen._round_definition.duplicate(true)
+	dense_round_definition["id"] = "R5"
+	dense_round_definition["supply_items"] = [
+		"MAT_IRON_ORE",
+		"MAT_WOOD",
+		"MAT_MANA_SHARD",
+	]
+	var dense_state: Dictionary = full_inventory_state.duplicate(true)
+	dense_state["active_requests"] = []
+	for request_index: int in range(3):
+		dense_state["active_requests"].append({
+			"event_id": "R5-E%d" % (request_index + 1),
+			"request_id": "REQ_DAGGER_STD",
+			"item_id": "EQ_DAGGER",
+			"required_level": 1 if request_index == 2 else 0,
+			"score": 10,
+			"remaining_patience_ticks": 400,
+		})
+	screen.render(
+		dense_round_definition,
+		dense_state,
+		screen._catalog,
+		{},
+		"큰 글씨 · 의뢰 3개 · 공급품 3개"
+	)
+	test.assert_true(
+		screen.find_child("FacilitySprite_FAC_SUPPLY", true, false) == null,
+		"a two-row supply grid yields decorative art space to usable controls"
+	)
+	test.assert_equal(
+		screen.find_children("SourceSupply_*", "Button", true, false).size(),
+		3,
+		"dense late-round supply keeps all three draggable materials"
+	)
+	var dense_request_row := screen.find_child("RequestTicketRow", true, false) as HBoxContainer
+	var dense_request_minimum_width := 0.0
+	for dense_child: Node in dense_request_row.get_children():
+		if dense_child is Control:
+			dense_request_minimum_width += (dense_child as Control).get_combined_minimum_size().x
+	dense_request_minimum_width += float(
+		maxi(0, dense_request_row.get_child_count() - 1)
+		* dense_request_row.get_theme_constant("separation")
+	)
+	test.assert_true(
+		dense_request_minimum_width <= 328.0,
+		"three active requests plus a waiting badge fit the mobile content width"
+	)
+	for dense_recipe_value: Variant in screen.find_children(
+		"RecipeButton_R5-*",
+		"Button",
+		true,
+		false
+	):
+		var dense_recipe := dense_recipe_value as Button
+		test.assert_true(
+			dense_recipe.clip_text and dense_recipe.custom_minimum_size.x <= 80.0,
+			"dense request cards cap semantic text width: %s" % dense_recipe.name
+		)
+	test.assert_true(
+		(screen.find_child("RequestItem_R5-E3", true, false) as Label).text.begins_with("+1"),
+		"compact enhanced requests keep the required level before any ellipsis"
 	)
 
 	screen.free()

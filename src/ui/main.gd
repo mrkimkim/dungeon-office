@@ -58,6 +58,8 @@ var _feedback_expires_at: int = 0
 var _snapshot_save_failed: bool = false
 var _confirm_cancel_callback: Callable
 var _discard_next_play_delta: bool = true
+var _pending_play_effects: Array[Dictionary] = []
+var _pending_drop_render: bool = false
 
 
 func _ready() -> void:
@@ -694,6 +696,7 @@ func _show_play() -> void:
 	_play_screen.start_requested.connect(_on_start_requested)
 	_play_screen.store_requested.connect(_on_store_requested)
 	_play_screen.pause_requested.connect(_pause_round)
+	_play_screen.drag_ended.connect(_on_play_drag_ended)
 	_content.add_child(_play_screen)
 	_play_screen.set_display_options(_profile.get("settings", {}))
 	_render_play()
@@ -728,6 +731,22 @@ func _render_play() -> void:
 		_selected_source,
 		visible_feedback
 	)
+	_flush_pending_play_effects()
+
+
+func _flush_pending_play_effects() -> void:
+	if _pending_play_effects.is_empty() or not is_instance_valid(_play_screen):
+		return
+	if _play_screen.is_drag_active():
+		return
+	var effects := _pending_play_effects.duplicate(true)
+	_pending_play_effects.clear()
+	for effect: Dictionary in effects:
+		if str(effect.get("run_id", "")) != _run_id:
+			continue
+		match str(effect.get("type", "")):
+			"delivery":
+				_play_screen.play_delivery_impact(effect)
 
 
 func _on_source_requested(source: Dictionary) -> void:
@@ -757,7 +776,20 @@ func _on_destination_requested(destination: Dictionary) -> void:
 
 func _on_item_drop_requested(source: Dictionary, destination: Dictionary) -> void:
 	_attempt_item_transfer(source, destination)
+	# drop_data arrives before Godot's DRAG_END notification. Wait for that
+	# explicit boundary so the rebuilt HUD cannot retain the dragged source.
+	if is_inside_tree() and is_instance_valid(_play_screen) and _play_screen.is_drag_active():
+		_pending_drop_render = true
+		return
 	_render_play()
+
+
+func _on_play_drag_ended() -> void:
+	if not _pending_drop_render:
+		return
+	_pending_drop_render = false
+	if _screen == "play":
+		_render_play()
 
 
 func _attempt_item_transfer(source: Dictionary, destination: Dictionary) -> bool:
@@ -838,8 +870,12 @@ func _consume_events(events: Array) -> void:
 				_set_feedback("✓ 작업이 끝났습니다. 산출물을 회수하세요.")
 				_play_tone(660.0, 0.1, true)
 			"delivered":
-				_set_feedback("✓ 납품 완료 · +%d점" % int(event.get("score", 0)))
-				_play_tone(880.0, 0.12, true)
+				var delivery_effect: Dictionary = event.duplicate(true)
+				delivery_effect["type"] = "delivery"
+				delivery_effect["run_id"] = _run_id
+				_pending_play_effects.append(delivery_effect)
+				_set_feedback("✓ 납품 완료 · +%d점" % int(event.get("score", 0)), 4.0)
+				_play_delivery_chime()
 			"item_moved", "item_stored":
 				_play_tone(520.0, 0.04)
 			"overheat_danger", "overheat_danger_entered":
@@ -1760,6 +1796,19 @@ func _play_tone(frequency: float, duration: float, haptic: bool = false) -> void
 		Input.vibrate_handheld(35)
 
 
+func _play_delivery_chime() -> void:
+	_play_tone(740.0, 0.09, true)
+	if not is_inside_tree():
+		return
+	var second_note := get_tree().create_timer(0.09)
+	second_note.timeout.connect(
+		func() -> void:
+			if is_instance_valid(_sfx_player):
+				_play_tone(1040.0, 0.14),
+		CONNECT_ONE_SHOT
+	)
+
+
 func _set_feedback(text: String, seconds: float = 3.0) -> void:
 	_feedback = text
 	_feedback_expires_at = Time.get_ticks_msec() + int(seconds * 1000.0)
@@ -1837,6 +1886,8 @@ func _show_fatal(title: String, details: String) -> void:
 func _clear_content() -> void:
 	if _content == null:
 		return
+	_pending_drop_render = false
+	_pending_play_effects.clear()
 	_sync_background()
 	for child: Node in _content.get_children():
 		_content.remove_child(child)
