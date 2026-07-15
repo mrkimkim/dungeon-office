@@ -8,6 +8,7 @@ const SettlementServiceScript = preload("res://src/app/settlement_service.gd")
 const RoundSimulatorScript = preload("res://src/sim/round_simulator.gd")
 const SimContractScript = preload("res://src/sim/sim_contract.gd")
 const PlayScreenScript = preload("res://src/ui/play_screen.gd")
+const TitleForgeTexture = preload("res://art/mvp/runtime/backgrounds/bg_title_forge.png")
 
 const AUTOSAVE_INTERVAL_SECONDS: float = 5.0
 const PLAY_REFRESH_SECONDS: float = 0.2
@@ -25,6 +26,9 @@ const ROUND_LEARNING: Dictionary = {
 }
 
 var _content: VBoxContainer
+var _background_color: ColorRect
+var _background_art: TextureRect
+var _background_overlay: ColorRect
 var _data_repository: DataRepository
 var _legal_repository: LegalTextRepository
 var _save_repository: SaveRepository
@@ -146,14 +150,34 @@ func _handle_back_request() -> bool:
 
 
 func _build_shell() -> void:
+	theme = _build_app_theme()
 	_sfx_player = AudioStreamPlayer.new()
 	_sfx_player.name = "GrayboxSfx"
 	add_child(_sfx_player)
 
-	var background := ColorRect.new()
-	background.color = Color("211a18")
-	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(background)
+	_background_color = ColorRect.new()
+	_background_color.name = "BackgroundColor"
+	_background_color.color = Color("17151d")
+	_background_color.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_background_color.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(_background_color)
+
+	_background_art = TextureRect.new()
+	_background_art.name = "TitleForgeArt"
+	_background_art.texture = TitleForgeTexture
+	_background_art.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_background_art.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	_background_art.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	_background_art.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_background_art.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(_background_art)
+
+	_background_overlay = ColorRect.new()
+	_background_overlay.name = "BackgroundOverlay"
+	_background_overlay.color = Color(0.055, 0.043, 0.065, 0.5)
+	_background_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_background_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(_background_overlay)
 
 	var margin := MarginContainer.new()
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -168,6 +192,7 @@ func _build_shell() -> void:
 	_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_content.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	margin.add_child(_content)
+	_sync_background()
 
 
 func _boot() -> void:
@@ -1279,11 +1304,84 @@ func _show_fatal(title: String, details: String) -> void:
 func _clear_content() -> void:
 	if _content == null:
 		return
+	_sync_background()
 	for child: Node in _content.get_children():
 		_content.remove_child(child)
 		child.queue_free()
 	_play_screen = null
 	_legal_notice_label = null
+
+
+func _sync_background() -> void:
+	if _background_art == null or _background_overlay == null or _background_color == null:
+		return
+	var show_title_art := _screen in ["boot", "title"]
+	_background_art.visible = show_title_art
+	_background_overlay.visible = show_title_art
+	_background_color.color = Color("17151d") if show_title_art else Color("1d1922")
+
+
+func _build_app_theme() -> Theme:
+	var app_theme := Theme.new()
+	app_theme.set_color("font_color", "Label", Color("fff0d0"))
+	app_theme.set_color("font_outline_color", "Label", Color(0.12, 0.08, 0.09, 0.9))
+	app_theme.set_constant("outline_size", "Label", 1)
+	app_theme.set_color("default_color", "RichTextLabel", Color("fff0d0"))
+	app_theme.set_color("font_color", "Button", Color("fff0d0"))
+	app_theme.set_color("font_hover_color", "Button", Color.WHITE)
+	app_theme.set_color("font_pressed_color", "Button", Color("fff7e5"))
+	app_theme.set_color("font_disabled_color", "Button", Color("8d8287"))
+	app_theme.set_stylebox("normal", "Button", _ui_style_box(
+		Color("604047"), Color("a4633f"), 10, 4, Color(0.04, 0.025, 0.035, 0.72)
+	))
+	app_theme.set_stylebox("hover", "Button", _ui_style_box(
+		Color("72505a"), Color("f0a259"), 10, 4, Color(0.04, 0.025, 0.035, 0.76)
+	))
+	app_theme.set_stylebox("pressed", "Button", _ui_style_box(
+		Color("4f353d"), Color("f07b43"), 10, 1, Color(0.04, 0.025, 0.035, 0.42)
+	))
+	app_theme.set_stylebox("disabled", "Button", _ui_style_box(
+		Color("302a33"), Color("514850"), 10, 2, Color(0.02, 0.02, 0.025, 0.35)
+	))
+	app_theme.set_stylebox("focus", "Button", _ui_style_box(
+		Color(0, 0, 0, 0), Color("63bce6"), 10, 2, Color(0, 0, 0, 0)
+	))
+	app_theme.set_stylebox("panel", "PanelContainer", _ui_style_box(
+		Color("2c2631"), Color("695462"), 12, 3, Color(0.025, 0.018, 0.028, 0.7)
+	))
+	app_theme.set_stylebox("normal", "LineEdit", _ui_style_box(
+		Color("231f28"), Color("695462"), 8, 2, Color(0.02, 0.015, 0.02, 0.55)
+	))
+	return app_theme
+
+
+func _ui_style_box(
+	background: Color,
+	border: Color,
+	corner_radius: int,
+	bottom_depth: int,
+	shadow: Color
+) -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = background
+	style.border_color = border
+	style.border_width_left = 1
+	style.border_width_top = 1
+	style.border_width_right = 1
+	style.border_width_bottom = bottom_depth
+	style.corner_radius_top_left = corner_radius
+	style.corner_radius_top_right = corner_radius
+	style.corner_radius_bottom_left = corner_radius
+	style.corner_radius_bottom_right = corner_radius
+	style.content_margin_left = 10
+	style.content_margin_right = 10
+	style.content_margin_top = 7
+	style.content_margin_bottom = 7 + bottom_depth
+	style.shadow_color = shadow
+	style.shadow_size = 4 if bottom_depth > 1 else 2
+	style.shadow_offset = Vector2(0, 2 if bottom_depth > 1 else 1)
+	style.anti_aliasing = true
+	return style
 
 
 func _add_heading(text: String) -> Label:
@@ -1347,6 +1445,16 @@ func _make_button(text: String, callback: Callable, primary: bool) -> Button:
 	button.text = text
 	button.custom_minimum_size = Vector2(0, 48 if primary else 44)
 	button.add_theme_font_size_override("font_size", _scaled_font_size(16 if primary else 14))
+	if primary:
+		button.add_theme_stylebox_override("normal", _ui_style_box(
+			Color("b85b35"), Color("f3a455"), 11, 5, Color(0.04, 0.025, 0.03, 0.78)
+		))
+		button.add_theme_stylebox_override("hover", _ui_style_box(
+			Color("cc6940"), Color("ffc26f"), 11, 5, Color(0.04, 0.025, 0.03, 0.8)
+		))
+		button.add_theme_stylebox_override("pressed", _ui_style_box(
+			Color("98482e"), Color("f07b43"), 11, 1, Color(0.04, 0.025, 0.03, 0.42)
+		))
 	button.pressed.connect(callback)
 	return button
 

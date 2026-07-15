@@ -2,6 +2,7 @@ class_name PlayScreen
 extends VBoxContainer
 
 const RoundReadModelScript = preload("res://src/sim/round_read_model.gd")
+const VisualCatalogScript = preload("res://src/ui/visual_catalog.gd")
 
 signal source_requested(source: Dictionary)
 signal destination_requested(destination: Dictionary)
@@ -18,6 +19,8 @@ const FACILITY_ORDER: Array[String] = [
 	"FAC_ENHANCE_ANVIL",
 ]
 const MINIMUM_TAP_SIZE: Vector2 = Vector2(44, 44)
+const FACILITY_SPRITE_SIZE: int = 56
+const ITEM_ICON_SIZE: int = 24
 
 var _catalog: Dictionary = {}
 var _round_definition: Dictionary = {}
@@ -316,9 +319,21 @@ func _build_requests() -> void:
 		var panel := _make_panel()
 		panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		request_row.add_child(panel)
+		var request_content := HBoxContainer.new()
+		request_content.add_theme_constant_override("separation", 2)
+		panel.add_child(request_content)
+		var request_icon := _make_texture_decoration(
+			VisualCatalogScript.item_texture(str(request.get("item_id", ""))),
+			ITEM_ICON_SIZE,
+			0.9
+		)
+		if request_icon != null:
+			request_icon.name = "RequestIcon_%s" % str(request.get("event_id", "unknown"))
+			request_content.add_child(request_icon)
 		var request_box := VBoxContainer.new()
 		request_box.add_theme_constant_override("separation", 0)
-		panel.add_child(request_box)
+		request_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		request_content.add_child(request_box)
 		var request_definition := _find_entry(
 			_catalog.get("requests", []),
 			str(request.get("request_id", ""))
@@ -369,6 +384,7 @@ func _build_facility_cell(parent: Container, facility_id: String) -> void:
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	parent.add_child(panel)
+	_add_facility_sprite(panel, facility_id)
 
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 2)
@@ -433,6 +449,12 @@ func _build_facility_cell(parent: Container, facility_id: String) -> void:
 			9
 		)
 		input_button.name = "SourceInput_%s_%d" % [facility_id, input_index]
+		_decorate_item_button(
+			input_button,
+			str(input_item.get("item_id", "")),
+			"ItemIcon_%s" % input_button.name,
+			9
+		)
 		item_row.add_child(input_button)
 
 	if status == "output" and facility.get("output") is Dictionary:
@@ -447,6 +469,12 @@ func _build_facility_cell(parent: Container, facility_id: String) -> void:
 			9
 		)
 		output_button.name = "SourceOutput_%s" % facility_id
+		_decorate_item_button(
+			output_button,
+			str(output.get("item_id", "")),
+			"ItemIcon_%s" % output_button.name,
+			9
+		)
 		item_row.add_child(output_button)
 
 	var action_row := HBoxContainer.new()
@@ -502,6 +530,12 @@ func _build_supply_cell(parent: VBoxContainer) -> void:
 		var source := {"kind": "supply", "item_id": item_id}
 		var button := _make_source_button(_item_name(item_id, 0), source, 9)
 		button.name = "SourceSupply_%s" % item_id
+		_decorate_item_button(
+			button,
+			item_id,
+			"ItemIcon_%s" % button.name,
+			9
+		)
 		supply_grid.add_child(button)
 
 
@@ -553,6 +587,12 @@ func _build_worker_and_inventory() -> void:
 		)
 		item_button.name = "SourceInventory_%d" % slot
 		item_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_decorate_item_button(
+			item_button,
+			str(item.get("item_id", "")),
+			"ItemIcon_%s" % item_button.name,
+			9
+		)
 		inventory_row.add_child(item_button)
 
 
@@ -580,6 +620,12 @@ func _build_destinations() -> void:
 	delivery_button.name = "DestinationDelivery"
 	delivery_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	delivery_button.disabled = not _can_deliver_selection()
+	_decorate_button_with_texture(
+		delivery_button,
+		VisualCatalogScript.facility_texture("FAC_DELIVERY"),
+		"FacilityActionIcon_FAC_DELIVERY",
+		10
+	)
 	row.add_child(delivery_button)
 
 	var trash_button := _make_button(
@@ -603,23 +649,137 @@ func _build_destinations() -> void:
 	row.add_child(cancel_button)
 
 
+func _add_facility_sprite(panel: PanelContainer, facility_id: String) -> void:
+	var texture := VisualCatalogScript.facility_texture(facility_id)
+	if texture == null:
+		return
+	var installed: bool = (
+		facility_id in ["FAC_SUPPLY", "FAC_TRASH"]
+		or _round_state.get("facilities", {}).has(facility_id)
+	)
+	var layer := CenterContainer.new()
+	layer.name = "FacilityArtLayer_%s" % facility_id
+	layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	layer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	panel.add_child(layer)
+	var sprite := _make_texture_decoration(
+		texture,
+		FACILITY_SPRITE_SIZE,
+		0.62 if installed else 0.18
+	)
+	if sprite == null:
+		return
+	sprite.name = "FacilitySprite_%s" % facility_id
+	layer.add_child(sprite)
+
+
+func _decorate_item_button(
+	button: Button,
+	item_id: String,
+	icon_name: String,
+	font_size: int
+) -> void:
+	_decorate_button_with_texture(
+		button,
+		VisualCatalogScript.item_texture(item_id),
+		icon_name,
+		font_size
+	)
+
+
+func _decorate_button_with_texture(
+	button: Button,
+	texture: Texture2D,
+	icon_name: String,
+	font_size: int
+) -> void:
+	if texture == null:
+		return
+	button.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	var visible_text := button.text
+	var icon := _make_texture_decoration(texture, ITEM_ICON_SIZE, 0.92)
+	if icon == null:
+		return
+	icon.name = icon_name
+	button.add_child(icon)
+	icon.anchor_left = 0.0
+	icon.anchor_top = 0.5
+	icon.anchor_right = 0.0
+	icon.anchor_bottom = 0.5
+	icon.offset_left = 2.0
+	icon.offset_top = -float(ITEM_ICON_SIZE) / 2.0
+	icon.offset_right = 2.0 + float(ITEM_ICON_SIZE)
+	icon.offset_bottom = float(ITEM_ICON_SIZE) / 2.0
+
+	# Keep Button.text as the semantic/test contract while drawing an outlined copy
+	# above the decorative icon. This avoids changing minimum widths in the dense
+	# 3x2 mobile grid and keeps disabled buttons visibly disabled.
+	for color_name: String in [
+		"font_color",
+		"font_hover_color",
+		"font_pressed_color",
+		"font_hover_pressed_color",
+		"font_focus_color",
+		"font_disabled_color",
+	]:
+		button.add_theme_color_override(color_name, Color.TRANSPARENT)
+	var text_overlay := Label.new()
+	text_overlay.name = "%s_Text" % icon_name
+	text_overlay.text = visible_text
+	text_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	text_overlay.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	text_overlay.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	text_overlay.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	text_overlay.max_lines_visible = 2
+	text_overlay.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	text_overlay.add_theme_font_size_override("font_size", _scaled_font_size(font_size))
+	text_overlay.add_theme_constant_override("outline_size", 2)
+	text_overlay.add_theme_color_override("font_outline_color", Color("241c19"))
+	text_overlay.modulate = Color("91877a") if button.disabled else Color("f4e7d0")
+	button.add_child(text_overlay)
+	text_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+
+
+func _make_texture_decoration(
+	texture: Texture2D,
+	size: int,
+	alpha: float
+) -> TextureRect:
+	if texture == null:
+		return null
+	var decoration := TextureRect.new()
+	decoration.texture = texture
+	decoration.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	decoration.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	decoration.custom_minimum_size = Vector2(size, size)
+	decoration.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	decoration.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	decoration.modulate = Color(1.0, 1.0, 1.0, alpha)
+	return decoration
+
+
 func _make_panel() -> PanelContainer:
 	var panel := PanelContainer.new()
 	var style := StyleBoxFlat.new()
-	style.bg_color = Color("332925")
-	style.border_color = Color("5d4d42")
+	style.bg_color = Color("2c2631")
+	style.border_color = Color("695462")
 	style.border_width_left = 1
 	style.border_width_top = 1
 	style.border_width_right = 1
-	style.border_width_bottom = 1
-	style.corner_radius_top_left = 4
-	style.corner_radius_top_right = 4
-	style.corner_radius_bottom_left = 4
-	style.corner_radius_bottom_right = 4
+	style.border_width_bottom = 3
+	style.corner_radius_top_left = 9
+	style.corner_radius_top_right = 9
+	style.corner_radius_bottom_left = 9
+	style.corner_radius_bottom_right = 9
 	style.content_margin_left = 3
 	style.content_margin_top = 2
 	style.content_margin_right = 3
-	style.content_margin_bottom = 2
+	style.content_margin_bottom = 4
+	style.shadow_color = Color(0.02, 0.015, 0.025, 0.65)
+	style.shadow_size = 3
+	style.shadow_offset = Vector2(0, 2)
+	style.anti_aliasing = true
 	panel.add_theme_stylebox_override("panel", style)
 	return panel
 

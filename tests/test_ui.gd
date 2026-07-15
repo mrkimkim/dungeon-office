@@ -9,6 +9,18 @@ static func run(test: TestFramework) -> void:
 	)
 	var app: Control = MainScript.new()
 	app._build_shell()
+	app._screen = "title"
+	app._clear_content()
+	var title_art := app.find_child("TitleForgeArt", true, false) as TextureRect
+	test.assert_true(title_art != null, "title screen must include the bundled pseudo-3D forge art")
+	if title_art != null:
+		test.assert_true(title_art.visible, "title forge art is visible on the title screen")
+		test.assert_true(title_art.texture != null, "title forge art texture is loaded offline")
+	app._screen = "settings"
+	app._clear_content()
+	if title_art != null:
+		test.assert_false(title_art.visible, "busy title art is hidden behind information screens")
+	test.assert_true(app.theme != null, "a shared casual diorama UI theme is installed")
 	app._show_legal_document("오픈소스 라이선스", {
 		"ok": true,
 		"text": "긴 법적 고지 문장이 모바일 화면 폭 안에서 자동으로 줄바꿈되어야 합니다.",

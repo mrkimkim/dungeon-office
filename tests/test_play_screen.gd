@@ -1,9 +1,42 @@
 extends RefCounted
 
 const PlayScreenScript = preload("res://src/ui/play_screen.gd")
+const VisualCatalogScript = preload("res://src/ui/visual_catalog.gd")
 
 
 static func run(test: TestFramework) -> void:
+	for facility_id: String in [
+		"FAC_SUPPLY",
+		"FAC_FURNACE",
+		"FAC_WEAPON_BENCH",
+		"FAC_SYNTH_BENCH",
+		"FAC_ENHANCE_ANVIL",
+		"FAC_DELIVERY",
+		"FAC_TRASH",
+	]:
+		test.assert_true(
+			VisualCatalogScript.facility_texture(facility_id) != null,
+			"visual catalog must resolve facility art for %s" % facility_id
+		)
+	for item_id: String in [
+		"MAT_IRON_ORE",
+		"MAT_WOOD",
+		"MAT_MANA_SHARD",
+		"MAT_IRON_INGOT",
+		"MAT_CHARCOAL",
+		"MAT_ENHANCEMENT_STONE",
+		"EQ_DAGGER",
+		"EQ_IRON_SWORD",
+	]:
+		test.assert_true(
+			VisualCatalogScript.item_texture(item_id) != null,
+			"visual catalog must resolve item art for %s" % item_id
+		)
+	test.assert_true(
+		VisualCatalogScript.item_texture("ITEM_WITHOUT_ART") == null,
+		"an unmapped visual ID must safely fall back to text-only UI"
+	)
+
 	var screen: PlayScreen = PlayScreenScript.new()
 	var selected_source := {"kind": "supply", "item_id": "MAT_IRON_ORE"}
 	screen.render(
@@ -86,6 +119,66 @@ static func run(test: TestFramework) -> void:
 			screen.find_child(required_name, true, false) != null,
 			"play screen is missing %s" % required_name
 		)
+	for required_art_name: String in [
+		"FacilitySprite_FAC_FURNACE",
+		"RequestIcon_R1-E1",
+		"ItemIcon_SourceSupply_MAT_IRON_ORE",
+		"ItemIcon_SourceOutput_FAC_FURNACE",
+		"ItemIcon_SourceInput_FAC_WEAPON_BENCH_0",
+		"FacilityActionIcon_FAC_DELIVERY",
+	]:
+		test.assert_true(
+			screen.find_child(required_art_name, true, false) != null,
+			"play screen is missing runtime art node %s" % required_art_name
+		)
+	var furnace_sprite := screen.find_child(
+		"FacilitySprite_FAC_FURNACE",
+		true,
+		false
+	) as TextureRect
+	test.assert_equal(
+		furnace_sprite.custom_minimum_size,
+		Vector2(56, 56),
+		"facility sprites use a stable 56px logical footprint"
+	)
+	for decoration_value: Variant in screen.find_children("*", "TextureRect", true, false):
+		var decoration: TextureRect = decoration_value
+		test.assert_equal(
+			decoration.mouse_filter,
+			Control.MOUSE_FILTER_IGNORE,
+			"runtime art must never intercept play input: %s" % decoration.name
+		)
+		test.assert_equal(
+			decoration.texture_filter,
+			CanvasItem.TEXTURE_FILTER_LINEAR,
+			"scaled runtime art must use linear filtering: %s" % decoration.name
+		)
+	for decorated_button_name: String in [
+		"SourceSupply_MAT_IRON_ORE",
+		"SourceOutput_FAC_FURNACE",
+		"SourceInput_FAC_WEAPON_BENCH_0",
+		"DestinationDelivery",
+	]:
+		var decorated_button := screen.find_child(
+			decorated_button_name,
+			true,
+			false
+		) as Button
+		test.assert_equal(
+			decorated_button.texture_filter,
+			CanvasItem.TEXTURE_FILTER_LINEAR,
+			"buttons containing runtime art must use linear filtering: %s" % decorated_button_name
+		)
+	test.assert_contains(
+		(screen.find_child("SourceSupply_MAT_IRON_ORE", true, false) as Button).text,
+		"철광석",
+		"item artwork must not replace a source button's semantic text"
+	)
+	test.assert_equal(
+		(screen.find_child("DestinationDelivery", true, false) as Button).text,
+		"납품",
+		"delivery artwork must not replace the existing action text"
+	)
 
 	var inventory_destinations := screen.find_children(
 		"DestinationInventory_*",
@@ -194,5 +287,27 @@ static func run(test: TestFramework) -> void:
 	test.assert_equal(observed_starts, ["FAC_WEAPON_BENCH"], "ready facility must emit start")
 	test.assert_equal(observed_stores, ["FAC_FURNACE"], "output facility must emit store")
 	test.assert_equal(pause_count[0], 1, "pause tap must emit once")
+
+	var inventory_state: Dictionary = next_state.duplicate(true)
+	inventory_state["inventory"][0] = {
+		"item_id": "MAT_IRON_INGOT",
+		"enhancement_level": 0,
+	}
+	screen.render(
+		screen._round_definition,
+		inventory_state,
+		screen._catalog,
+		{},
+		"인벤토리 아이콘"
+	)
+	test.assert_true(
+		screen.find_child("ItemIcon_SourceInventory_0", true, false) != null,
+		"occupied inventory slots must retain item artwork"
+	)
+	test.assert_contains(
+		(screen.find_child("SourceInventory_0", true, false) as Button).text,
+		"철 주괴",
+		"inventory artwork must retain the slot's text label"
+	)
 
 	screen.free()

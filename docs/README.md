@@ -37,7 +37,7 @@
 | 9 | `TECH-SIM-001` | [runtime-contract.md](runtime-contract.md) | 결정론적 상태·명령·이벤트·틱·읽기 모델 | 규칙·진행·아이템·레시피·라운드·밸런스·UX·UI |
 | 10 | `AUD-MVP-001` | [audio-spec.md](audio-spec.md) | 음악·효과음·햅틱 명세 | MVP·UX·UI·아트·라운드·밸런스 |
 | 10 | `TECH-DATA-001` | [data-save-contract.md](data-save-contract.md) | 콘텐츠 스키마·저장·복구·마이그레이션·정산 원자성 | 도메인·콘텐츠·밸런스·UX·런타임 계약 |
-| 11 | `TECH-MVP-001` | [technical-spec.md](technical-spec.md) | Godot 프로젝트·Android·오프라인·빌드·서명·CI | MVP·상업·Play 출시·UX·UI·런타임·데이터 |
+| 11 | `TECH-MVP-001` | [technical-spec.md](technical-spec.md) | Godot 프로젝트·Android·오프라인·빌드·서명·CI | MVP·상업·Play 출시·UX·UI·아트·런타임·데이터 |
 | 12 | `QA-MVP-001` | [qa-release.md](qa-release.md) | 기능·결정론·실기·재미·Play 출시 게이트 | 모든 산출 문서 |
 
 표에서 긴 dependency 집합을 의미 단위로 줄여 쓴 행의 정확한 직접 목록은 해당 문서 메타데이터가 Source of Truth다.
@@ -127,6 +127,7 @@ flowchart TD
   REL --> TECH
   UX --> TECH
   UI --> TECH
+  ART --> TECH
   SIM --> TECH
   DATA --> TECH
 
