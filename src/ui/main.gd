@@ -8,6 +8,7 @@ const SettlementServiceScript = preload("res://src/app/settlement_service.gd")
 const RoundSimulatorScript = preload("res://src/sim/round_simulator.gd")
 const SimContractScript = preload("res://src/sim/sim_contract.gd")
 const PlayScreenScript = preload("res://src/ui/play_screen.gd")
+const RecipeGuideScript = preload("res://src/ui/recipe_guide.gd")
 const TitleForgeTexture = preload("res://art/mvp/runtime/backgrounds/bg_title_forge.png")
 
 const AUTOSAVE_INTERVAL_SECONDS: float = 5.0
@@ -67,7 +68,13 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	if _screen != "play":
 		return
-	if str(_round_state.get("status", "")) != "running":
+	var round_status := str(_round_state.get("status", ""))
+	if round_status == "ended":
+		set_process(false)
+		_save_snapshot()
+		_settle_round()
+		return
+	if round_status != "running":
 		return
 	if bool(_round_state.get("paused", false)):
 		return
@@ -130,6 +137,8 @@ func _handle_back_request() -> bool:
 			_resume_round()
 		"pause_brief":
 			_show_pause()
+		"recipe":
+			_resume_round()
 		"confirm":
 			if _confirm_cancel_callback.is_valid():
 				_confirm_cancel_callback.call()
@@ -463,6 +472,8 @@ func _show_play() -> void:
 	_play_screen.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_play_screen.source_requested.connect(_on_source_requested)
 	_play_screen.destination_requested.connect(_on_destination_requested)
+	_play_screen.item_drop_requested.connect(_on_item_drop_requested)
+	_play_screen.recipe_requested.connect(_show_recipe_guide)
 	_play_screen.start_requested.connect(_on_start_requested)
 	_play_screen.store_requested.connect(_on_store_requested)
 	_play_screen.pause_requested.connect(_pause_round)
@@ -508,7 +519,7 @@ func _on_source_requested(source: Dictionary) -> void:
 		_set_feedback("선택을 취소했습니다.")
 	else:
 		_selected_source = source.duplicate(true)
-		_set_feedback("아이템을 선택했습니다. 이동할 곳을 누르세요.")
+		_set_feedback("아이템을 선택했습니다. 목적지를 누르거나 끌어 놓으세요.")
 	_render_play()
 
 
@@ -523,8 +534,19 @@ func _on_destination_requested(destination: Dictionary) -> void:
 		_set_feedback("선택을 취소했습니다.")
 		_render_play()
 		return
+	_attempt_item_transfer(_selected_source, destination)
+	_render_play()
+
+
+func _on_item_drop_requested(source: Dictionary, destination: Dictionary) -> void:
+	_attempt_item_transfer(source, destination)
+	_render_play()
+
+
+func _attempt_item_transfer(source: Dictionary, destination: Dictionary) -> bool:
 	var type := SimContractScript.COMMAND_MOVE
-	var payload: Dictionary = {"source": _selected_source.duplicate(true)}
+	var payload: Dictionary = {"source": source.duplicate(true)}
+	var kind := str(destination.get("kind", ""))
 	match kind:
 		"facility_input", "inventory":
 			payload["destination"] = destination.duplicate(true)
@@ -534,12 +556,11 @@ func _on_destination_requested(destination: Dictionary) -> void:
 			type = SimContractScript.COMMAND_DISCARD
 		_:
 			_set_feedback("이동할 수 없는 목적지입니다.")
-			_render_play()
-			return
+			return false
 	var accepted := _dispatch_command(type, payload)
 	if accepted:
 		_selected_source = {}
-	_render_play()
+	return accepted
 
 
 func _on_start_requested(facility_id: String) -> void:
@@ -632,6 +653,129 @@ func _pause_round() -> void:
 	_show_pause()
 
 
+func _show_recipe_guide(item_id: String, enhancement_level: int) -> void:
+	if _screen != "play":
+		return
+	if not bool(_round_state.get("paused", false)):
+		if not _dispatch_command(SimContractScript.COMMAND_PAUSE):
+			_render_play()
+			return
+	set_process(false)
+	var guide := RecipeGuideScript.build(
+		_data_repository.catalog,
+		item_id,
+		enhancement_level
+	)
+	_screen = "recipe"
+	_clear_content()
+	var target: Dictionary = guide.get("target", {})
+	var target_name := str(target.get("display_name", item_id))
+	var heading := _add_heading("%s 제작법" % target_name)
+	heading.name = "RecipeTitleLabel"
+	var pause_notice := _add_panel_text("제작법을 보는 동안 라운드는 일시정지됩니다.", Color("9fdcc8"))
+	pause_notice.name = "RecipePauseNotice"
+
+	var scroll := ScrollContainer.new()
+	scroll.name = "RecipeScroll"
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_content.add_child(scroll)
+	var body := VBoxContainer.new()
+	body.name = "RecipeBody"
+	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	body.add_theme_constant_override("separation", 6)
+	scroll.add_child(body)
+
+	if not bool(guide.get("ok", false)):
+		var empty_label := _add_recipe_label(
+			body,
+			"제작법을 불러올 수 없습니다. 아이템은 그대로 보존됩니다.",
+			14,
+			Color("ffcf78")
+		)
+		empty_label.name = "RecipeEmptyLabel"
+	else:
+		var raw_texts: Array[String] = []
+		for amount_value: Variant in guide.get("raw_materials", []):
+			raw_texts.append(_recipe_amount_text(amount_value))
+		var raw_panel := _add_recipe_panel(
+			body,
+			"필요 원자재\n%s" % " · ".join(raw_texts),
+			Color("f0bf6a")
+		)
+		raw_panel.name = "RecipeRawMaterials"
+
+		var tick_rate := maxi(
+			1,
+			int(_data_repository.catalog.get("rules", {}).get("tick_rate", 20))
+		)
+		var step_number := 1
+		for step_value: Variant in guide.get("steps", []):
+			var step: Dictionary = step_value
+			var input_texts: Array[String] = []
+			for input_value: Variant in step.get("inputs", []):
+				input_texts.append(_recipe_amount_text(input_value))
+			var run_count := int(step.get("run_count", 1))
+			var seconds := ceili(
+				float(int(step.get("total_duration_ticks", 0))) / float(tick_rate)
+			)
+			var process_text := "%s · %d초" % [
+				str(step.get("facility_display_name", step.get("facility_id", ""))),
+				seconds,
+			]
+			if run_count > 1:
+				process_text += " · %d회" % run_count
+			if str(step.get("worker_mode", "")) == "one":
+				process_text += " · 일꾼 필요"
+			var step_panel := _add_recipe_panel(
+				body,
+				"%d. %s\n%s  →  %s" % [
+					step_number,
+					process_text,
+					" + ".join(input_texts),
+					_recipe_amount_text(step.get("output", {})),
+				],
+				Color("f2dfc2")
+			)
+			step_panel.name = "RecipeStep_%s" % str(step.get("recipe_id", "unknown"))
+			step_number += 1
+
+	var close_button := _add_button("게임으로 돌아가기", _resume_round)
+	close_button.name = "RecipeCloseButton"
+
+
+func _add_recipe_panel(parent: Container, text: String, color: Color) -> PanelContainer:
+	var panel := PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	parent.add_child(panel)
+	_add_recipe_label(panel, text, 13, color)
+	return panel
+
+
+func _add_recipe_label(
+	parent: Node,
+	text: String,
+	font_size: int,
+	color: Color
+) -> Label:
+	var label := Label.new()
+	label.text = text
+	label.modulate = color
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.add_theme_font_size_override("font_size", _scaled_font_size(font_size))
+	parent.add_child(label)
+	return label
+
+
+func _recipe_amount_text(amount_value: Variant) -> String:
+	if not amount_value is Dictionary:
+		return "?"
+	var amount: Dictionary = amount_value
+	var count := int(amount.get("count", 1))
+	return "%s ×%d" % [str(amount.get("display_name", amount.get("item_id", "?"))), count]
+
+
 func _pause_for_interruption() -> void:
 	if _screen != "play" or bool(_round_state.get("paused", false)):
 		return
@@ -662,10 +806,31 @@ func _resume_round() -> void:
 	if not bool(_round_state.get("paused", false)):
 		_show_play()
 		return
-	_dispatch_command(SimContractScript.COMMAND_RESUME)
+	if not _dispatch_command(SimContractScript.COMMAND_RESUME):
+		set_process(false)
+		if _screen == "recipe":
+			_show_recipe_resume_error()
+		elif _screen in ["pause", "pause_brief"]:
+			_show_pause("재개하지 못했습니다. 라운드는 계속 정지되어 있습니다. 다시 시도하세요.")
+		return
 	_tick_accumulator = 0.0
 	_refresh_accumulator = 0.0
 	_show_play()
+
+
+func _show_recipe_resume_error() -> void:
+	var existing := find_child("RecipeResumeError", true, false) as Label
+	if existing != null:
+		existing.text = "재개하지 못했습니다. 라운드는 계속 정지되어 있습니다. 다시 시도하세요."
+		return
+	var label := _add_panel_text(
+		"재개하지 못했습니다. 라운드는 계속 정지되어 있습니다. 다시 시도하세요.",
+		Color("ffcf78")
+	)
+	label.name = "RecipeResumeError"
+	var panel := label.get_parent()
+	if panel != null and _content.get_child_count() >= 2:
+		_content.move_child(panel, _content.get_child_count() - 2)
 
 
 func _show_pause_brief() -> void:
@@ -1159,21 +1324,21 @@ func _has_valid_snapshot() -> bool:
 func _tutorial_hint() -> String:
 	var round_id := str(_round_state.get("round_id", ""))
 	if round_id != "R1" or not _round_state.get("deliveries", []).is_empty():
-		return "탭 순서: 아이템 선택 → 목적지. 준비된 작업자 시설은 시작을 누르세요."
+		return "아이템을 목적지로 끌어 놓으세요. 준비된 작업자 시설은 시작을 누르세요."
 	var furnace: Dictionary = _round_state.get("facilities", {}).get("FAC_FURNACE", {})
 	var bench: Dictionary = _round_state.get("facilities", {}).get("FAC_WEAPON_BENCH", {})
 	if str(furnace.get("status", "")) == "empty" and str(bench.get("status", "")) == "empty":
-		return "① 공급함의 철광석을 누르고 용광로를 누르세요."
+		return "① 공급함의 철광석을 용광로로 끌어 놓으세요."
 	if str(furnace.get("status", "")) == "working":
 		return "② 철 주괴를 제련 중입니다. 완료되면 산출물을 선택하세요."
 	if str(furnace.get("status", "")) == "output":
-		return "③ 용광로 산출물을 선택하고 무기 제작대를 누르세요."
+		return "③ 용광로의 철 주괴를 무기 제작대로 끌어 놓으세요."
 	if str(bench.get("status", "")) == "ready":
 		return "④ 무기 제작대의 시작 버튼을 누르세요. 일꾼 한 명이 작업합니다."
 	if str(bench.get("status", "")) == "working":
 		return "⑤ 단검 제작 중입니다. 완료되면 산출물을 선택하세요."
 	if str(bench.get("status", "")) == "output":
-		return "⑥ 완성된 단검을 선택하고 납품을 누르세요."
+		return "⑥ 완성된 단검을 인벤토리 옆 납품대로 끌어 놓으세요."
 	return "철 주괴를 무기 제작대에 넣고 단검을 만드세요."
 
 

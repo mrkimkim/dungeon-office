@@ -35,6 +35,7 @@ fi
 
 for setting in \
   'permissions/internet=false' \
+  'permissions/vibrate=true' \
   'permissions/custom_permissions=PackedStringArray()' \
   'architectures/arm64-v8a=true' \
   'architectures/armeabi-v7a=false' \
@@ -48,4 +49,4 @@ done
 
 echo "Offline boundary: PASS"
 echo "  network-APIs=absent remote-SDKs=absent Billing=absent"
-echo "  INTERNET=disabled custom-permissions=empty ABI=arm64-v8a-only"
+echo "  INTERNET=disabled VIBRATE=enabled custom-permissions=empty ABI=arm64-v8a-only"

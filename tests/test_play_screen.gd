@@ -4,6 +4,13 @@ const PlayScreenScript = preload("res://src/ui/play_screen.gd")
 const VisualCatalogScript = preload("res://src/ui/visual_catalog.gd")
 
 
+class DragTestPlayScreen extends PlayScreen:
+	var forced_drag_data: Variant = null
+
+	func _active_drag_data() -> Variant:
+		return forced_drag_data
+
+
 static func run(test: TestFramework) -> void:
 	for facility_id: String in [
 		"FAC_SUPPLY",
@@ -37,7 +44,7 @@ static func run(test: TestFramework) -> void:
 		"an unmapped visual ID must safely fall back to text-only UI"
 	)
 
-	var screen: PlayScreen = PlayScreenScript.new()
+	var screen := DragTestPlayScreen.new()
 	var selected_source := {"kind": "supply", "item_id": "MAT_IRON_ORE"}
 	screen.render(
 		{
@@ -54,6 +61,7 @@ static func run(test: TestFramework) -> void:
 			"tick": 20,
 			"deadline_ticks": 1800,
 			"score": 10,
+			"deliveries": [],
 			"waiting_requests": [],
 			"active_requests": [{
 				"event_id": "R1-E1",
@@ -85,9 +93,21 @@ static func run(test: TestFramework) -> void:
 		{
 			"rules": {"tick_rate": 20},
 			"items": [
-				{"id": "MAT_IRON_ORE", "display_name": "철광석"},
-				{"id": "MAT_IRON_INGOT", "display_name": "철 주괴"},
-				{"id": "EQ_DAGGER", "display_name": "단검"},
+				{
+					"id": "MAT_IRON_ORE",
+					"display_name": "철광석",
+					"category": "raw_material",
+				},
+				{
+					"id": "MAT_IRON_INGOT",
+					"display_name": "철 주괴",
+					"category": "processed_material",
+				},
+				{
+					"id": "EQ_DAGGER",
+					"display_name": "단검",
+					"category": "equipment",
+				},
 			],
 			"facilities": [
 				{"id": "FAC_SUPPLY", "display_name": "재료 공급함"},
@@ -96,6 +116,42 @@ static func run(test: TestFramework) -> void:
 				{"id": "FAC_WEAPON_BENCH", "display_name": "무기 제작대"},
 				{"id": "FAC_SYNTH_BENCH", "display_name": "합성 작업대"},
 				{"id": "FAC_ENHANCE_ANVIL", "display_name": "강화 모루"},
+			],
+			"recipes": [
+				{
+					"id": "RCP_SMELT_IRON",
+					"facility_id": "FAC_FURNACE",
+					"inputs": [{
+						"item_id": "MAT_IRON_ORE",
+						"enhancement_level": 0,
+						"count": 1,
+					}],
+					"output": {
+						"item_id": "MAT_IRON_INGOT",
+						"enhancement_level": 0,
+						"count": 1,
+					},
+					"worker_mode": "none",
+					"overheat_output": true,
+					"duration_ticks": 160,
+				},
+				{
+					"id": "RCP_CRAFT_DAGGER",
+					"facility_id": "FAC_WEAPON_BENCH",
+					"inputs": [{
+						"item_id": "MAT_IRON_INGOT",
+						"enhancement_level": 0,
+						"count": 1,
+					}],
+					"output": {
+						"item_id": "EQ_DAGGER",
+						"enhancement_level": 0,
+						"count": 1,
+					},
+					"worker_mode": "one",
+					"overheat_output": false,
+					"duration_ticks": 120,
+				},
 			],
 			"requests": [{"id": "REQ_DAGGER_STD", "forecast": false}],
 		},
@@ -111,9 +167,8 @@ static func run(test: TestFramework) -> void:
 		"SourceOutput_FAC_FURNACE",
 		"Store_FAC_FURNACE",
 		"Start_FAC_WEAPON_BENCH",
-		"DestinationDelivery",
-		"DestinationTrashAction",
-		"DestinationCancel",
+		"DropTargetDelivery",
+		"RecipeButton_R1-E1",
 	]:
 		test.assert_true(
 			screen.find_child(required_name, true, false) != null,
@@ -125,7 +180,7 @@ static func run(test: TestFramework) -> void:
 		"ItemIcon_SourceSupply_MAT_IRON_ORE",
 		"ItemIcon_SourceOutput_FAC_FURNACE",
 		"ItemIcon_SourceInput_FAC_WEAPON_BENCH_0",
-		"FacilityActionIcon_FAC_DELIVERY",
+		"FacilityDropIcon_FAC_DELIVERY",
 	]:
 		test.assert_true(
 			screen.find_child(required_art_name, true, false) != null,
@@ -157,7 +212,7 @@ static func run(test: TestFramework) -> void:
 		"SourceSupply_MAT_IRON_ORE",
 		"SourceOutput_FAC_FURNACE",
 		"SourceInput_FAC_WEAPON_BENCH_0",
-		"DestinationDelivery",
+		"DropTargetDelivery",
 	]:
 		var decorated_button := screen.find_child(
 			decorated_button_name,
@@ -175,13 +230,13 @@ static func run(test: TestFramework) -> void:
 		"item artwork must not replace a source button's semantic text"
 	)
 	test.assert_equal(
-		(screen.find_child("DestinationDelivery", true, false) as Button).text,
-		"납품",
+		(screen.find_child("DropTargetDelivery", true, false) as Button).text,
+		"납품대",
 		"delivery artwork must not replace the existing action text"
 	)
 
 	var inventory_destinations := screen.find_children(
-		"DestinationInventory_*",
+		"DropTargetInventory_*",
 		"Button",
 		true,
 		false
@@ -213,17 +268,61 @@ static func run(test: TestFramework) -> void:
 			button.custom_minimum_size.x >= 44.0 and button.custom_minimum_size.y >= 44.0,
 			"every play button must have a 44x44 minimum tap target: %s" % button.name
 		)
+	for removed_destination_name: String in [
+		"DestinationInventory",
+		"DestinationDelivery",
+		"DestinationTrashAction",
+		"DestinationCancel",
+	]:
+		test.assert_true(
+			screen.find_child(removed_destination_name, true, false) == null,
+			"obsolete bottom action must be absent: %s" % removed_destination_name
+		)
+
+	var furnace_output_source := {
+		"kind": "facility_output",
+		"facility_id": "FAC_FURNACE",
+	}
+	var furnace_output_payload: Dictionary = screen._drag_payload_for_source(
+		furnace_output_source
+	)
+	test.assert_equal(
+		str(furnace_output_payload.get("type", "")),
+		PlayScreenScript.DRAG_PAYLOAD_TYPE,
+		"drag payload uses the stable item-source contract"
+	)
+	test.assert_equal(
+		furnace_output_payload.get("source", {}),
+		furnace_output_source,
+		"drag payload preserves its authoritative source DTO"
+	)
+	test.assert_equal(
+		furnace_output_payload.get("item", {}).get("item_id", ""),
+		"MAT_IRON_INGOT",
+		"drag payload includes the inspected item"
+	)
+	test.assert_true(
+		screen._can_drop_payload(
+			furnace_output_payload,
+			{"kind": "inventory", "slot": 0}
+		),
+		"a furnace output can be dropped into a specific empty inventory slot"
+	)
 	test.assert_false(
-		(screen.find_child("DestinationInventory", true, false) as Button).disabled,
-		"authoritative command preview enables a legal inventory destination"
+		screen._can_drop_payload(furnace_output_payload, {"kind": "delivery"}),
+		"processed material cannot be dropped on the delivery target"
 	)
-	test.assert_true(
-		(screen.find_child("DestinationDelivery", true, false) as Button).disabled,
-		"authoritative command preview disables delivery for raw material"
+	test.assert_false(
+		screen._can_drop_payload(
+			{"type": "wrong-payload", "source": furnace_output_source},
+			{"kind": "inventory", "slot": 0}
+		),
+		"drop validation rejects foreign payload contracts"
 	)
-	test.assert_true(
-		(screen.find_child("DestinationTrashAction", true, false) as Button).disabled,
-		"the infinite supply source cannot be discarded"
+	var supply_payload: Dictionary = screen._drag_payload_for_source(selected_source)
+	test.assert_false(
+		screen._can_drop_payload(supply_payload, {"kind": "trash"}),
+		"the infinite supply source cannot be discarded by drag"
 	)
 
 	var pause_before := screen.find_child("PauseButton", true, false) as Button
@@ -266,6 +365,8 @@ static func run(test: TestFramework) -> void:
 
 	var observed_sources: Array[Dictionary] = []
 	var observed_destinations: Array[Dictionary] = []
+	var observed_drops: Array[Dictionary] = []
+	var observed_recipes: Array[Dictionary] = []
 	var observed_starts: Array[String] = []
 	var observed_stores: Array[String] = []
 	var pause_count := [0]
@@ -273,17 +374,56 @@ static func run(test: TestFramework) -> void:
 	screen.destination_requested.connect(
 		func(destination: Dictionary) -> void: observed_destinations.append(destination)
 	)
+	screen.item_drop_requested.connect(
+		func(source: Dictionary, destination: Dictionary) -> void:
+			observed_drops.append({
+				"source": source,
+				"destination": destination,
+			})
+	)
+	screen.recipe_requested.connect(
+		func(item_id: String, enhancement_level: int) -> void:
+			observed_recipes.append({
+				"item_id": item_id,
+				"enhancement_level": enhancement_level,
+			})
+	)
 	screen.start_requested.connect(func(facility_id: String) -> void: observed_starts.append(facility_id))
 	screen.store_requested.connect(func(facility_id: String) -> void: observed_stores.append(facility_id))
 	screen.pause_requested.connect(func() -> void: pause_count[0] += 1)
 
 	(screen.find_child("SourceSupply_MAT_IRON_ORE", true, false) as Button).pressed.emit()
-	(screen.find_child("DestinationDelivery", true, false) as Button).pressed.emit()
+	(screen.find_child("DropTargetDelivery", true, false) as Button).pressed.emit()
+	(screen.find_child("RecipeButton_R1-E1", true, false) as Button).pressed.emit()
 	(screen.find_child("Start_FAC_WEAPON_BENCH", true, false) as Button).pressed.emit()
 	(screen.find_child("Store_FAC_FURNACE", true, false) as Button).pressed.emit()
 	(screen.find_child("PauseButton", true, false) as Button).pressed.emit()
+	var inventory_drop_target := screen.find_child(
+		"DropTargetInventory_0",
+		true,
+		false
+	) as Control
+	var delivery_drop_target := screen.find_child(
+		"DropTargetDelivery",
+		true,
+		false
+	) as Control
+	screen._forward_drop_data(
+		Vector2.ZERO,
+		furnace_output_payload,
+		inventory_drop_target
+	)
+	screen._forward_drop_data(Vector2.ZERO, supply_payload, delivery_drop_target)
 	test.assert_equal(observed_sources, [selected_source], "supply tap must emit its source DTO")
 	test.assert_equal(observed_destinations, [{"kind": "delivery"}], "delivery tap must emit destination")
+	test.assert_equal(observed_drops, [{
+		"source": furnace_output_source,
+		"destination": {"kind": "inventory", "slot": 0},
+	}], "a valid forwarded drop emits one atomic source/destination request")
+	test.assert_equal(observed_recipes, [{
+		"item_id": "EQ_DAGGER",
+		"enhancement_level": 0,
+	}], "request recipe action emits the exact requested item and level")
 	test.assert_equal(observed_starts, ["FAC_WEAPON_BENCH"], "ready facility must emit start")
 	test.assert_equal(observed_stores, ["FAC_FURNACE"], "output facility must emit store")
 	test.assert_equal(pause_count[0], 1, "pause tap must emit once")
@@ -308,6 +448,110 @@ static func run(test: TestFramework) -> void:
 		(screen.find_child("SourceInventory_0", true, false) as Button).text,
 		"철 주괴",
 		"inventory artwork must retain the slot's text label"
+	)
+
+	var delivery_state: Dictionary = next_state.duplicate(true)
+	delivery_state["inventory"][0] = {
+		"item_id": "EQ_DAGGER",
+		"enhancement_level": 0,
+	}
+	screen.render(
+		screen._round_definition,
+		delivery_state,
+		screen._catalog,
+		{},
+		"납품 가능 장비"
+	)
+	var dagger_payload: Dictionary = screen._drag_payload_for_source({
+		"kind": "inventory",
+		"slot": 0,
+	})
+	test.assert_true(
+		screen._can_drop_payload(dagger_payload, {"kind": "delivery"}),
+		"matching equipment can be dropped on the delivery target"
+	)
+	test.assert_false(
+		screen._can_drop_payload(
+			dagger_payload,
+			{"kind": "facility_input", "facility_id": "FAC_FURNACE"}
+		),
+		"equipment is rejected by an incompatible processing facility"
+	)
+	screen._set_drop_target_highlights(dagger_payload)
+	var highlighted_delivery := screen.find_child(
+		"DropTargetDelivery",
+		true,
+		false
+	) as Control
+	var rejected_furnace := screen.find_child(
+		"FacilityCell_FAC_FURNACE",
+		true,
+		false
+	) as Control
+	test.assert_true(
+		highlighted_delivery.scale.x > 1.0,
+		"a valid drop target receives a non-color scale cue"
+	)
+	test.assert_equal(
+		rejected_furnace.scale,
+		Vector2.ONE,
+		"an invalid target is not given the valid-target scale cue"
+	)
+	screen._reset_drop_target_highlights()
+	test.assert_equal(
+		highlighted_delivery.scale,
+		Vector2.ONE,
+		"ending a drag resets the target shape cue"
+	)
+
+	screen.forced_drag_data = dagger_payload
+	var request_withdrawn_state: Dictionary = delivery_state.duplicate(true)
+	request_withdrawn_state["active_requests"] = []
+	screen.render(
+		screen._round_definition,
+		request_withdrawn_state,
+		screen._catalog,
+		{},
+		"드래그 중 의뢰 철회"
+	)
+	test.assert_false(
+		bool(highlighted_delivery.get_meta("drop_valid", true)),
+		"render revalidates a destination whose legality changes during a drag"
+	)
+	test.assert_equal(
+		highlighted_delivery.scale,
+		Vector2.ONE,
+		"a destination that becomes invalid loses its shape cue during the drag"
+	)
+	screen.forced_drag_data = null
+	screen._reset_drop_target_highlights()
+	screen.render(
+		screen._round_definition,
+		delivery_state,
+		screen._catalog,
+		{},
+		"드래그 종료"
+	)
+
+	var paused_state: Dictionary = delivery_state.duplicate(true)
+	paused_state["paused"] = true
+	screen.render(
+		screen._round_definition,
+		paused_state,
+		screen._catalog,
+		{},
+		"일시정지"
+	)
+	test.assert_true(
+		screen._drag_payload_for_source({"kind": "inventory", "slot": 0}).is_empty(),
+		"paused play cannot create a draggable item payload"
+	)
+	test.assert_false(
+		screen._can_drop_payload(
+			furnace_output_payload,
+			{"kind": "inventory", "slot": 1}
+		),
+		"paused play rejects an otherwise legal drop"
 	)
 
 	screen.free()

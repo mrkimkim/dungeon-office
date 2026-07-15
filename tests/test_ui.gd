@@ -7,6 +7,13 @@ static func run(test: TestFramework) -> void:
 		bool(ProjectSettings.get_setting("application/config/quit_on_go_back", true)),
 		"Android Back must reach the app router before any quit decision"
 	)
+	test.assert_true(
+		bool(ProjectSettings.get_setting(
+			"input_devices/pointing/emulate_mouse_from_touch",
+			false
+		)),
+		"Android touch swipes must reach Control drag-and-drop as mouse drags"
+	)
 	var app: Control = MainScript.new()
 	app._build_shell()
 	app._screen = "title"

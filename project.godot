@@ -35,6 +35,11 @@ environment/defaults/default_clear_color=Color(0.105, 0.086, 0.078, 1)
 
 driver/enable_input=false
 
+[input_devices]
+
+pointing/emulate_mouse_from_touch=true
+pointing/emulate_touch_from_mouse=false
+
 [debug]
 
 gdscript/warnings/untyped_declaration=1

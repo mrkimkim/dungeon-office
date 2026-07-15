@@ -32,6 +32,8 @@ static func run(test: TestFramework) -> void:
 	test.assert_equal(int(settlement.get("stars", 0)), int(expected.get("stars", -1)), "R1 fixture stars")
 
 	_test_rejection_contract(repository, test)
+	_test_specific_inventory_destination(repository, test)
+	_test_same_facility_input_drop_rejected(repository, test)
 	_test_tick_boundary(repository, test)
 	_test_sequence_gap(repository, test)
 	_test_pause_resume_control_ticks(repository, test)
@@ -83,6 +85,102 @@ static func _test_rejection_contract(repository: DataRepository, test: TestFrame
 	test.assert_equal(result["state"]["inventory"], state["inventory"], "rejected move must not change inventory")
 	test.assert_equal(result["state"]["facilities"], state["facilities"], "rejected move must not change facilities")
 	test.assert_equal(int(result["state"]["score"]), 0, "rejected move must not change score")
+
+
+static func _test_specific_inventory_destination(
+	repository: DataRepository,
+	test: TestFramework
+) -> void:
+	var round_definition := repository.get_round("R1")
+	var state := RoundSimulatorScript.create_state(round_definition, repository.catalog)
+	var place_in_fourth := SimContractScript.command(0, 1, SimContractScript.COMMAND_MOVE, {
+		"source": {"kind": "supply", "item_id": "MAT_IRON_ORE"},
+		"destination": {"kind": "inventory", "slot": 3},
+	})
+	var placed := RoundSimulatorScript.step(
+		state,
+		[place_in_fourth],
+		round_definition,
+		repository.catalog
+	)
+	test.assert_true(
+		bool(placed["command_results"][0].get("accepted", false)),
+		"a drop can target a specific empty inventory slot"
+	)
+	test.assert_equal(
+		str(placed["state"]["inventory"][3].get("item_id", "")),
+		"MAT_IRON_ORE",
+		"the simulator preserves the inventory slot chosen by the drop"
+	)
+	for slot: int in range(3):
+		test.assert_true(
+			placed["state"]["inventory"][slot] == null,
+			"placing in slot four must not silently fill an earlier slot"
+		)
+
+	state = placed["state"]
+	var occupied := SimContractScript.command(1, 2, SimContractScript.COMMAND_MOVE, {
+		"source": {"kind": "supply", "item_id": "MAT_IRON_ORE"},
+		"destination": {"kind": "inventory", "slot": 3},
+	})
+	var rejected := RoundSimulatorScript.step(
+		state,
+		[occupied],
+		round_definition,
+		repository.catalog
+	)
+	test.assert_false(
+		bool(rejected["command_results"][0].get("accepted", true)),
+		"dropping on an occupied inventory slot is rejected"
+	)
+	test.assert_equal(
+		str(rejected["command_results"][0].get("reason", "")),
+		SimContractScript.REJECT_INVENTORY_FULL,
+		"occupied-slot rejection uses the stable inventory-full reason"
+	)
+
+
+static func _test_same_facility_input_drop_rejected(
+	repository: DataRepository,
+	test: TestFramework
+) -> void:
+	var round_definition := repository.get_round("R2")
+	var state := RoundSimulatorScript.create_state(round_definition, repository.catalog)
+	state["facilities"]["FAC_WEAPON_BENCH"]["inputs"] = [
+		{"item_id": "MAT_IRON_INGOT", "enhancement_level": 0},
+	]
+	state["facilities"]["FAC_WEAPON_BENCH"]["status"] = "input"
+	var command := SimContractScript.command(0, 1, SimContractScript.COMMAND_MOVE, {
+		"source": {
+			"kind": "facility_input",
+			"facility_id": "FAC_WEAPON_BENCH",
+			"slot": 0,
+		},
+		"destination": {
+			"kind": "facility_input",
+			"facility_id": "FAC_WEAPON_BENCH",
+		},
+	})
+	var result := RoundSimulatorScript.step(
+		state,
+		[command],
+		round_definition,
+		repository.catalog
+	)
+	test.assert_false(
+		bool(result["command_results"][0].get("accepted", true)),
+		"an input cannot be dropped back onto the same facility"
+	)
+	test.assert_equal(
+		str(result["command_results"][0].get("reason", "")),
+		SimContractScript.REJECT_INVALID_DESTINATION,
+		"same-facility drops use the stable invalid-destination reason"
+	)
+	test.assert_equal(
+		result["state"]["facilities"]["FAC_WEAPON_BENCH"]["inputs"],
+		state["facilities"]["FAC_WEAPON_BENCH"]["inputs"],
+		"a rejected same-facility drop preserves every input"
+	)
 
 static func _test_tick_boundary(repository: DataRepository, test: TestFramework) -> void:
 	var round_definition := repository.get_round("R1")

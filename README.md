@@ -3,7 +3,8 @@
 Android 전용 무료 MVP를 위한 Godot 4.7 프로젝트다. 현재 구현은 전체 흐름과 핵심 재미를 검증하는 **오프라인 플레이테스트 빌드**이며, 그레이박스 위에 캐주얼 의사 3D 1차 아트 패스를 적용하는 단계다.
 
 - 부팅 → 타이틀 → 지도·브리핑 → R1~R5 직접 조작 → 정산·해금·재도전
-- 공급함·시설·인벤토리·일꾼·의뢰를 탭으로 연결하는 제작·납품 화면
+- 아이템을 시설·인벤토리·납품대·쓰레기통 사이로 직접 끌어 놓는 제작·납품 화면
+- 의뢰별 원자재 총량과 전체 선행 공정을 보여주는 일시정지 제작법 화면
 - 일시정지·백그라운드 자동 중단, 5초 자동 저장, 이어하기·재시작·포기
 - R4 이후 게임 내 골드로 여는 강화 설비와 R5의 결정론적 +1 강화
 - R1~R5 카탈로그·밸런스 JSON 로드와 참조 검증
@@ -73,7 +74,7 @@ godot --editor --path .
 
 ## Android export
 
-`export_presets.cfg`에는 standard-template debug APK와 Gradle-template Play AAB preset이 있지만 서명 비밀은 없다. 두 preset 모두 minSdk 24, target/compileSdk 36, `INTERNET` 권한 없음, Android 자동 백업 비활성화를 유지한다.
+`export_presets.cfg`에는 standard-template debug APK와 Gradle-template Play AAB preset이 있지만 서명 비밀은 없다. 두 preset 모두 minSdk 24, target/compileSdk 36, `INTERNET` 권한 없음, 햅틱용 `VIBRATE`만 허용, Android 자동 백업 비활성화를 유지한다.
 
 debug APK를 만든 뒤 manifest와 번들 경계를 검사할 수 있다.
 

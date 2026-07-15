@@ -2,6 +2,7 @@ extends SceneTree
 
 const TestFrameworkScript = preload("res://tests/test_framework.gd")
 const TestDataRepository = preload("res://tests/test_data_repository.gd")
+const TestRecipeGuide = preload("res://tests/test_recipe_guide.gd")
 const TestSimulator = preload("res://tests/test_simulator.gd")
 const TestSaveRepository = preload("res://tests/test_save_repository.gd")
 const TestDocumentGraph = preload("res://tests/test_document_graph.gd")
@@ -14,6 +15,7 @@ func _init() -> void:
 	var test := TestFrameworkScript.new()
 	print("Dungeon Office headless tests (Godot %s)" % Engine.get_version_info().get("string", "unknown"))
 	TestDataRepository.run(test)
+	TestRecipeGuide.run(test)
 	TestSimulator.run(test)
 	TestSaveRepository.run(test)
 	TestDocumentGraph.run(test)

@@ -62,6 +62,77 @@ static func run(test: TestFramework) -> void:
 		app.find_child("SourceSupply_MAT_IRON_ORE", true, false) != null,
 		"play screen exposes a direct iron-ore source"
 	)
+	var tick_before_recipe := int(app._round_state.get("tick", -1))
+	var recipe_button := app.find_child("RecipeButton_R1-E1", true, false) as Button
+	test.assert_true(recipe_button != null, "the active request exposes its recipe action")
+	recipe_button.pressed.emit()
+	test.assert_equal(app._screen, "recipe", "recipe action opens the paused recipe guide")
+	test.assert_true(
+		bool(app._round_state.get("paused", false)),
+		"opening a recipe pauses the round"
+	)
+	test.assert_equal(
+		int(app._round_state.get("tick", -2)),
+		tick_before_recipe,
+		"opening a recipe spends no simulation tick"
+	)
+	test.assert_contains(
+		(app.find_child("RecipeTitleLabel", true, false) as Label).text,
+		"단검",
+		"recipe guide identifies the requested equipment"
+	)
+	test.assert_true(
+		app.find_child("RecipeStep_RCP_SMELT_IRON", true, false) != null,
+		"dagger recipe includes its iron-smelting prerequisite"
+	)
+	test.assert_true(
+		app.find_child("RecipeStep_RCP_CRAFT_DAGGER", true, false) != null,
+		"dagger recipe includes its final crafting step"
+	)
+	test.assert_true(app._handle_back_request(), "Android Back handles an open recipe guide")
+	test.assert_equal(app._screen, "play", "Back returns from the recipe guide to play")
+	test.assert_false(
+		bool(app._round_state.get("paused", true)),
+		"Back resumes the round after recipe inspection"
+	)
+	test.assert_equal(
+		int(app._round_state.get("tick", -2)),
+		tick_before_recipe,
+		"closing a recipe with Back spends no simulation tick"
+	)
+
+	recipe_button = app.find_child("RecipeButton_R1-E1", true, false) as Button
+	recipe_button.pressed.emit()
+	var recipe_close := app.find_child("RecipeCloseButton", true, false) as Button
+	test.assert_true(recipe_close != null, "recipe guide exposes an explicit close action")
+	app._round_state["status"] = "completed"
+	recipe_close.pressed.emit()
+	test.assert_equal(
+		app._screen,
+		"recipe",
+		"a rejected resume keeps the recipe guide open"
+	)
+	test.assert_true(
+		bool(app._round_state.get("paused", false)),
+		"a rejected resume cannot make the paused round look active"
+	)
+	test.assert_true(
+		app.find_child("RecipeResumeError", true, false) != null,
+		"a rejected resume exposes an inline retry explanation"
+	)
+	app._round_state["status"] = "running"
+	app._snapshot_save_failed = false
+	recipe_close.pressed.emit()
+	test.assert_equal(app._screen, "play", "recipe close action returns to play")
+	test.assert_false(
+		bool(app._round_state.get("paused", true)),
+		"recipe close action resumes the round"
+	)
+	test.assert_equal(
+		int(app._round_state.get("tick", -2)),
+		tick_before_recipe,
+		"explicitly closing a recipe spends no simulation tick"
+	)
 	var tick_before_hitch := int(app._round_state.get("tick", -1))
 	app._process(90.0)
 	test.assert_equal(
@@ -75,23 +146,35 @@ static func run(test: TestFramework) -> void:
 		"an Android scheduler hitch cannot fast-forward more than 250ms"
 	)
 
-	app._on_source_requested({"kind": "supply", "item_id": "MAT_IRON_ORE"})
-	app._on_destination_requested({
-		"kind": "facility_input",
-		"facility_id": "FAC_FURNACE",
-	})
+	app._on_item_drop_requested(
+		{"kind": "supply", "item_id": "MAT_IRON_ORE"},
+		{
+			"kind": "facility_input",
+			"facility_id": "FAC_FURNACE",
+		}
+	)
 	test.assert_equal(
 		str(app._round_state["facilities"]["FAC_FURNACE"].get("status", "")),
 		"working",
-		"two taps start the automatic furnace"
+		"dropping ore starts the automatic furnace"
 	)
 	_advance_until_output(app, "FAC_FURNACE")
-	app._on_store_requested("FAC_FURNACE")
-	app._on_source_requested({"kind": "inventory", "slot": 0})
-	app._on_destination_requested({
-		"kind": "facility_input",
-		"facility_id": "FAC_WEAPON_BENCH",
-	})
+	app._on_item_drop_requested(
+		{"kind": "facility_output", "facility_id": "FAC_FURNACE"},
+		{"kind": "inventory", "slot": 0}
+	)
+	test.assert_equal(
+		str(app._round_state["inventory"][0].get("item_id", "")),
+		"MAT_IRON_INGOT",
+		"dropping a furnace output stores it in the chosen inventory slot"
+	)
+	app._on_item_drop_requested(
+		{"kind": "inventory", "slot": 0},
+		{
+			"kind": "facility_input",
+			"facility_id": "FAC_WEAPON_BENCH",
+		}
+	)
 	app._on_start_requested("FAC_WEAPON_BENCH")
 	test.assert_equal(
 		str(app._round_state["facilities"]["FAC_WEAPON_BENCH"].get("status", "")),
@@ -99,15 +182,13 @@ static func run(test: TestFramework) -> void:
 		"ready worker facility starts from the HUD action"
 	)
 	_advance_until_output(app, "FAC_WEAPON_BENCH")
-	app._on_store_requested("FAC_WEAPON_BENCH")
-	app._on_source_requested({"kind": "inventory", "slot": 0})
-	app._on_destination_requested({"kind": "delivery"})
+	app._on_item_drop_requested(
+		{"kind": "facility_output", "facility_id": "FAC_WEAPON_BENCH"},
+		{"kind": "delivery"}
+	)
 	test.assert_equal(int(app._round_state.get("score", 0)), 10, "direct R1 cycle awards score")
 	test.assert_equal(app._round_state.get("deliveries", []).size(), 1, "direct R1 cycle records delivery")
-
-	app._on_source_requested({"kind": "supply", "item_id": "MAT_IRON_ORE"})
-	app._on_destination_requested({"kind": "cancel"})
-	test.assert_true(app._selected_source.is_empty(), "cancel destination clears selection")
+	test.assert_true(app._selected_source.is_empty(), "atomic drops leave no stale tap selection")
 
 	var tick_before_pause := int(app._round_state.get("tick", -1))
 	app._pause_round()
@@ -140,6 +221,25 @@ static func run(test: TestFramework) -> void:
 	app._confirm_cancel_callback.call()
 	test.assert_equal(app._screen, "shop", "purchase confirmation cancel returns to the shop")
 	test.assert_equal(int(app._profile.get("gold", -1)), 200, "cancel does not spend gold")
+
+	app._show_brief("R1")
+	app._start_round("R1")
+	app._round_state["deadline_ticks"] = int(app._round_state.get("tick", 0)) + 1
+	app._on_item_drop_requested(
+		{"kind": "supply", "item_id": "MAT_IRON_ORE"},
+		{"kind": "inventory", "slot": 0}
+	)
+	test.assert_equal(
+		str(app._round_state.get("status", "")),
+		"ended",
+		"a command on the final tick can end a round"
+	)
+	app._process(0.0)
+	test.assert_equal(
+		app._screen,
+		"result",
+		"a round ended by the final input command is settled on the next process pass"
+	)
 
 	app.free()
 	test.assert_true(bool(save_repository.delete_all().get("ok", false)), "app flow cleanup")

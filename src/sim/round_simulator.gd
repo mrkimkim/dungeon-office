@@ -212,7 +212,15 @@ static func _command_move(
 	var destination_kind := str(destination.get("kind", ""))
 
 	if destination_kind == "inventory":
-		var inventory_slot := _first_empty_inventory_slot(state)
+		var inventory_slot := int(destination.get("slot", -1))
+		if destination.has("slot") and inventory_slot < 0:
+			return Contract.rejected(Contract.REJECT_INVALID_DESTINATION)
+		if inventory_slot >= state["inventory"].size():
+			return Contract.rejected(Contract.REJECT_INVALID_DESTINATION)
+		if inventory_slot >= 0 and state["inventory"][inventory_slot] != null:
+			return Contract.rejected(Contract.REJECT_INVENTORY_FULL)
+		if inventory_slot < 0:
+			inventory_slot = _first_empty_inventory_slot(state)
 		if inventory_slot < 0:
 			return Contract.rejected(Contract.REJECT_INVENTORY_FULL)
 		_remove_source(state, source, catalog)
@@ -227,6 +235,11 @@ static func _command_move(
 		var facility_id := str(destination.get("facility_id", ""))
 		if not state["facilities"].has(facility_id):
 			return Contract.rejected(Contract.REJECT_FACILITY_UNAVAILABLE)
+		if (
+			str(source.get("kind", "")) == "facility_input"
+			and str(source.get("facility_id", "")) == facility_id
+		):
+			return Contract.rejected(Contract.REJECT_INVALID_DESTINATION)
 		var facility: Dictionary = state["facilities"][facility_id]
 		if str(facility.get("status", "")) in ["working", "output"]:
 			return Contract.rejected(Contract.REJECT_FACILITY_BUSY)

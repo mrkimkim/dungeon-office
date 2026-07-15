@@ -2,10 +2,14 @@ class_name PlayScreen
 extends VBoxContainer
 
 const RoundReadModelScript = preload("res://src/sim/round_read_model.gd")
+const RoundSimulatorScript = preload("res://src/sim/round_simulator.gd")
+const SimContractScript = preload("res://src/sim/sim_contract.gd")
 const VisualCatalogScript = preload("res://src/ui/visual_catalog.gd")
 
 signal source_requested(source: Dictionary)
 signal destination_requested(destination: Dictionary)
+signal item_drop_requested(source: Dictionary, destination: Dictionary)
+signal recipe_requested(item_id: String, enhancement_level: int)
 signal start_requested(facility_id: String)
 signal store_requested(facility_id: String)
 signal pause_requested()
@@ -21,6 +25,8 @@ const FACILITY_ORDER: Array[String] = [
 const MINIMUM_TAP_SIZE: Vector2 = Vector2(44, 44)
 const FACILITY_SPRITE_SIZE: int = 56
 const ITEM_ICON_SIZE: int = 24
+const DRAG_PREVIEW_ICON_SIZE: int = 40
+const DRAG_PAYLOAD_TYPE: String = "dungeon_office/item_source_v1"
 
 var _catalog: Dictionary = {}
 var _round_definition: Dictionary = {}
@@ -31,6 +37,7 @@ var _round_interactive: bool = false
 var _large_text_enabled: bool = false
 var _color_assist_enabled: bool = false
 var _structure_signature: String = ""
+var _drop_target_roots: Array[Control] = []
 
 
 func _init() -> void:
@@ -71,6 +78,14 @@ func render(
 		and not bool(_round_state.get("paused", false))
 	)
 	var next_signature := _make_structure_signature()
+	var active_drag_data: Variant = _active_drag_data()
+	if (
+		get_child_count() > 0
+		and active_drag_data is Dictionary
+	):
+		_update_dynamic_text(feedback)
+		_set_drop_target_highlights(active_drag_data)
+		return
 	if next_signature == _structure_signature and get_child_count() > 0:
 		_update_dynamic_text(feedback)
 		return
@@ -81,14 +96,37 @@ func render(
 	_build_requests()
 	_build_facilities()
 	_build_worker_and_inventory()
-	_build_destinations()
 	_update_dynamic_text(feedback)
 
 
 func _clear() -> void:
+	_drop_target_roots.clear()
 	for child: Node in get_children():
 		remove_child(child)
 		child.queue_free()
+
+
+func _exit_tree() -> void:
+	if get_viewport() != null and get_viewport().gui_is_dragging():
+		get_viewport().gui_cancel_drag()
+
+
+func _notification(what: int) -> void:
+	if not is_inside_tree():
+		return
+	if what == NOTIFICATION_DRAG_BEGIN:
+		_set_drop_target_highlights(get_viewport().gui_get_drag_data())
+	elif what == NOTIFICATION_DRAG_END:
+		_reset_drop_target_highlights()
+
+
+func _active_drag_data() -> Variant:
+	if not is_inside_tree():
+		return null
+	var viewport := get_viewport()
+	if viewport == null or not viewport.gui_is_dragging():
+		return null
+	return viewport.gui_get_drag_data()
 
 
 func _make_structure_signature() -> String:
@@ -172,7 +210,7 @@ func _update_dynamic_text(feedback: String) -> void:
 	var feedback_label := find_child("FeedbackLabel", true, false) as Label
 	if feedback_label != null:
 		feedback_label.text = (
-			"아이템을 고른 뒤 시설·납품·수납·파기를 탭하세요."
+			"아이템을 끌어 시설·빈칸·납품대·쓰레기통에 놓으세요."
 			if feedback.strip_edges().is_empty()
 			else feedback.strip_edges()
 		)
@@ -278,7 +316,7 @@ func _build_feedback(feedback: String) -> void:
 
 	var message := feedback.strip_edges()
 	if message.is_empty():
-		message = "아이템을 고른 뒤 시설·납품·수납·파기를 탭하세요."
+		message = "아이템을 끌어 시설·빈칸·납품대·쓰레기통에 놓으세요."
 	var feedback_label := _add_label(self, message, 12, Color("f2bd69"))
 	feedback_label.name = "FeedbackLabel"
 	feedback_label.custom_minimum_size = Vector2(0, 40 if _large_text_enabled else 34)
@@ -362,6 +400,17 @@ func _build_requests() -> void:
 			HORIZONTAL_ALIGNMENT_CENTER
 		)
 		request_timer.name = "RequestTimer_%s" % str(request.get("event_id", "unknown"))
+		var recipe_button := _make_button(
+			"제작법",
+			Callable(self, "_emit_recipe").bind(
+				str(request.get("item_id", "")),
+				int(request.get("required_level", 0))
+			),
+			9
+		)
+		recipe_button.name = "RecipeButton_%s" % str(request.get("event_id", "unknown"))
+		recipe_button.tooltip_text = "%s 전체 제작법" % item_text
+		request_box.add_child(recipe_button)
 
 
 func _build_facilities() -> void:
@@ -409,8 +458,9 @@ func _build_facility_cell(parent: Container, facility_id: String) -> void:
 			10
 		)
 		discard_button.name = "DestinationTrash"
-		discard_button.disabled = not _can_discard_selection()
+		discard_button.disabled = not _round_interactive
 		box.add_child(discard_button)
+		_register_drop_target_tree(panel, {"kind": "trash"})
 		return
 
 	var facilities: Dictionary = _round_state.get("facilities", {})
@@ -490,10 +540,7 @@ func _build_facility_cell(parent: Container, facility_id: String) -> void:
 		)
 		destination_button.name = "Destination_%s" % facility_id
 		destination_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		destination_button.disabled = not _can_move_selection_to({
-			"kind": "facility_input",
-			"facility_id": facility_id,
-		})
+		destination_button.disabled = not _round_interactive
 		action_row.add_child(destination_button)
 	if status == "ready":
 		var start_button := _make_button(
@@ -515,6 +562,11 @@ func _build_facility_cell(parent: Container, facility_id: String) -> void:
 		store_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		store_button.disabled = not _facility_command_available(facility_id, "can_store")
 		action_row.add_child(store_button)
+
+	_register_drop_target_tree(panel, {
+		"kind": "facility_input",
+		"facility_id": facility_id,
+	})
 
 
 func _build_supply_cell(parent: VBoxContainer) -> void:
@@ -562,15 +614,17 @@ func _build_worker_and_inventory() -> void:
 	for slot: int in range(capacity):
 		var item_value: Variant = inventory[slot] if slot < inventory.size() else null
 		if item_value == null:
+			var inventory_destination := {"kind": "inventory", "slot": slot}
 			var empty_button := _make_button(
 				"%d\n빈칸" % (slot + 1),
-				Callable(self, "_emit_destination").bind({"kind": "inventory"}),
+				Callable(self, "_emit_destination").bind(inventory_destination),
 				9
 			)
-			empty_button.name = "DestinationInventory_%d" % slot
+			empty_button.name = "DropTargetInventory_%d" % slot
 			empty_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			empty_button.disabled = not _can_move_selection_to({"kind": "inventory"})
+			empty_button.disabled = not _round_interactive
 			inventory_row.add_child(empty_button)
+			_register_drop_target_tree(empty_button, inventory_destination)
 			continue
 		var item: Dictionary = item_value
 		var source := {"kind": "inventory", "slot": slot}
@@ -595,58 +649,23 @@ func _build_worker_and_inventory() -> void:
 		)
 		inventory_row.add_child(item_button)
 
-
-func _build_destinations() -> void:
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 4)
-	row.custom_minimum_size = Vector2(0, 44)
-	add_child(row)
-
-	var inventory_button := _make_button(
-		"인벤토리",
-		Callable(self, "_emit_destination").bind({"kind": "inventory"}),
-		10
-	)
-	inventory_button.name = "DestinationInventory"
-	inventory_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	inventory_button.disabled = not _can_move_selection_to({"kind": "inventory"})
-	row.add_child(inventory_button)
-
 	var delivery_button := _make_button(
-		"납품",
+		"납품대",
 		Callable(self, "_emit_destination").bind({"kind": "delivery"}),
-		10
+		9
 	)
-	delivery_button.name = "DestinationDelivery"
+	delivery_button.name = "DropTargetDelivery"
+	delivery_button.tooltip_text = "완성 장비를 이곳에 놓으면 조건에 맞는 의뢰에 자동 납품합니다."
 	delivery_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	delivery_button.disabled = not _can_deliver_selection()
+	delivery_button.disabled = not _round_interactive
 	_decorate_button_with_texture(
 		delivery_button,
 		VisualCatalogScript.facility_texture("FAC_DELIVERY"),
-		"FacilityActionIcon_FAC_DELIVERY",
-		10
+		"FacilityDropIcon_FAC_DELIVERY",
+		9
 	)
-	row.add_child(delivery_button)
-
-	var trash_button := _make_button(
-		"파기",
-		Callable(self, "_emit_destination").bind({"kind": "trash"}),
-		10
-	)
-	trash_button.name = "DestinationTrashAction"
-	trash_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	trash_button.disabled = not _can_discard_selection()
-	row.add_child(trash_button)
-
-	var cancel_button := _make_button(
-		"선택 취소",
-		Callable(self, "_emit_destination").bind({"kind": "cancel"}),
-		10
-	)
-	cancel_button.name = "DestinationCancel"
-	cancel_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	cancel_button.disabled = _selected_source.is_empty()
-	row.add_child(cancel_button)
+	inventory_row.add_child(delivery_button)
+	_register_drop_target_tree(delivery_button, {"kind": "delivery"})
 
 
 func _add_facility_sprite(panel: PanelContainer, facility_id: String) -> void:
@@ -759,6 +778,178 @@ func _make_texture_decoration(
 	return decoration
 
 
+func _register_drag_source(control: Control, source: Dictionary) -> void:
+	control.set_meta("drag_source", source.duplicate(true))
+	_configure_drag_forwarding(control)
+
+
+func _register_drop_target_tree(root: Control, destination: Dictionary) -> void:
+	if not _drop_target_roots.has(root):
+		_drop_target_roots.append(root)
+	_register_drop_control(root, destination)
+	for child_value: Variant in root.find_children("*", "Control", true, false):
+		var child := child_value as Control
+		if child != null and child.mouse_filter != Control.MOUSE_FILTER_IGNORE:
+			_register_drop_control(child, destination)
+
+
+func _register_drop_control(control: Control, destination: Dictionary) -> void:
+	control.set_meta("drop_destination", destination.duplicate(true))
+	_configure_drag_forwarding(control)
+
+
+func _configure_drag_forwarding(control: Control) -> void:
+	control.set_drag_forwarding(
+		Callable(self, "_forward_get_drag_data").bind(control),
+		Callable(self, "_forward_can_drop_data").bind(control),
+		Callable(self, "_forward_drop_data").bind(control)
+	)
+
+
+func _forward_get_drag_data(_at_position: Vector2, control: Control) -> Variant:
+	if not control.has_meta("drag_source"):
+		return null
+	var source: Dictionary = control.get_meta("drag_source", {})
+	var payload := _drag_payload_for_source(source)
+	if payload.is_empty():
+		return null
+	control.set_drag_preview(_make_drag_preview(payload.get("item", {})))
+	if is_inside_tree():
+		get_viewport().gui_set_drag_description(
+			"%s 이동" % _item_name(
+				str(payload.get("item", {}).get("item_id", "")),
+				int(payload.get("item", {}).get("enhancement_level", 0))
+			)
+		)
+	return payload
+
+
+func _forward_can_drop_data(
+	_at_position: Vector2,
+	data: Variant,
+	control: Control
+) -> bool:
+	if not control.has_meta("drop_destination"):
+		return false
+	return _can_drop_payload(data, control.get_meta("drop_destination", {}))
+
+
+func _forward_drop_data(
+	_at_position: Vector2,
+	data: Variant,
+	control: Control
+) -> void:
+	if not control.has_meta("drop_destination"):
+		return
+	var destination: Dictionary = control.get_meta("drop_destination", {})
+	if not _can_drop_payload(data, destination):
+		return
+	var source: Dictionary = data.get("source", {})
+	item_drop_requested.emit(source.duplicate(true), destination.duplicate(true))
+
+
+func _drag_payload_for_source(source: Dictionary) -> Dictionary:
+	if not _round_interactive:
+		return {}
+	var inspected := RoundSimulatorScript.inspect_source(
+		_round_state,
+		source,
+		_round_definition
+	)
+	if not bool(inspected.get("ok", false)):
+		return {}
+	return {
+		"type": DRAG_PAYLOAD_TYPE,
+		"source": source.duplicate(true),
+		"item": inspected.get("item", {}).duplicate(true),
+	}
+
+
+func _can_drop_payload(data: Variant, destination: Dictionary) -> bool:
+	if not data is Dictionary or str(data.get("type", "")) != DRAG_PAYLOAD_TYPE:
+		return false
+	var source_value: Variant = data.get("source", {})
+	if not source_value is Dictionary:
+		return false
+	return _can_drop_source(source_value, destination)
+
+
+func _can_drop_source(source: Dictionary, destination: Dictionary) -> bool:
+	if not _round_interactive:
+		return false
+	var command_type := SimContractScript.COMMAND_MOVE
+	var payload: Dictionary = {"source": source.duplicate(true)}
+	match str(destination.get("kind", "")):
+		"facility_input", "inventory":
+			payload["destination"] = destination.duplicate(true)
+		"delivery":
+			command_type = SimContractScript.COMMAND_DELIVER
+		"trash":
+			command_type = SimContractScript.COMMAND_DISCARD
+		_:
+			return false
+	var preview := RoundSimulatorScript.preview_command(
+		_round_state,
+		command_type,
+		payload,
+		_round_definition,
+		_catalog
+	)
+	return bool(preview.get("accepted", false))
+
+
+func _make_drag_preview(item: Dictionary) -> Control:
+	var panel := _make_panel()
+	panel.name = "ItemDragPreview"
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.custom_minimum_size = Vector2(140, 48)
+	var row := HBoxContainer.new()
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_theme_constant_override("separation", 4)
+	panel.add_child(row)
+	var item_id := str(item.get("item_id", ""))
+	var icon := _make_texture_decoration(
+		VisualCatalogScript.item_texture(item_id),
+		DRAG_PREVIEW_ICON_SIZE,
+		1.0
+	)
+	if icon != null:
+		row.add_child(icon)
+	var label := _add_label(
+		row,
+		_item_name(item_id, int(item.get("enhancement_level", 0))),
+		11,
+		Color("fff0d0")
+	)
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	label.custom_minimum_size = Vector2(82, DRAG_PREVIEW_ICON_SIZE)
+	label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	return panel
+
+
+func _set_drop_target_highlights(data: Variant) -> void:
+	for target: Control in _drop_target_roots:
+		if not is_instance_valid(target):
+			continue
+		var destination: Dictionary = target.get_meta("drop_destination", {})
+		var valid := _can_drop_payload(data, destination)
+		target.set_meta("drop_valid", valid)
+		target.pivot_offset = target.size * 0.5
+		target.scale = Vector2(1.02, 1.02) if valid else Vector2.ONE
+		target.modulate = Color("d5ffe8") if valid else Color("8a808a")
+
+
+func _reset_drop_target_highlights() -> void:
+	for target: Control in _drop_target_roots:
+		if not is_instance_valid(target):
+			continue
+		target.remove_meta("drop_valid")
+		target.scale = Vector2.ONE
+		target.modulate = Color.WHITE
+
+
 func _make_panel() -> PanelContainer:
 	var panel := PanelContainer.new()
 	var style := StyleBoxFlat.new()
@@ -801,6 +992,7 @@ func _make_source_button(text: String, source: Dictionary, font_size: int = 10) 
 		font_size
 	)
 	button.disabled = not _round_interactive
+	_register_drag_source(button, source)
 	return button
 
 
@@ -827,6 +1019,10 @@ func _emit_source(source: Dictionary) -> void:
 
 func _emit_destination(destination: Dictionary) -> void:
 	destination_requested.emit(destination.duplicate(true))
+
+
+func _emit_recipe(item_id: String, enhancement_level: int) -> void:
+	recipe_requested.emit(item_id, enhancement_level)
 
 
 func _emit_start(facility_id: String) -> void:
@@ -930,35 +1126,6 @@ func _item_name(item_id: String, enhancement_level: int) -> String:
 func _facility_name(facility_id: String) -> String:
 	var definition := _find_entry(_catalog.get("facilities", []), facility_id)
 	return str(definition.get("display_name", facility_id))
-
-
-func _selected_actions() -> Dictionary:
-	var actions: Variant = _read_model.get("selected_actions", {})
-	return actions if actions is Dictionary else {}
-
-
-func _can_move_selection_to(destination: Dictionary) -> bool:
-	if not _round_interactive or not bool(_selected_actions().get("has_selection", false)):
-		return false
-	for destination_value: Variant in _selected_actions().get("move_destinations", []):
-		if not destination_value is Dictionary:
-			continue
-		var candidate: Dictionary = destination_value
-		if str(candidate.get("kind", "")) != str(destination.get("kind", "")):
-			continue
-		if str(destination.get("kind", "")) != "facility_input":
-			return true
-		if str(candidate.get("facility_id", "")) == str(destination.get("facility_id", "")):
-			return true
-	return false
-
-
-func _can_deliver_selection() -> bool:
-	return _round_interactive and bool(_selected_actions().get("can_deliver", false))
-
-
-func _can_discard_selection() -> bool:
-	return _round_interactive and bool(_selected_actions().get("can_discard", false))
 
 
 func _facility_command_available(facility_id: String, key: String) -> bool:

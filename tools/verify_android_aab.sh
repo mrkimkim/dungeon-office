@@ -158,6 +158,11 @@ for permission in "${FORBIDDEN_PERMISSIONS[@]}"; do
   fi
 done
 
+grep -Fq 'android:name="android.permission.VIBRATE"' <<<"${MANIFEST}" || {
+  echo "ERROR: 햅틱 기능에 필요한 VIBRATE 권한이 없습니다." >&2
+  exit 1
+}
+
 grep -Eq 'android:allowBackup="false"' <<<"${MANIFEST}" || {
   echo "ERROR: Android 자동 백업이 비활성화되지 않았습니다." >&2
   exit 1
@@ -223,6 +228,6 @@ done
 
 echo "Android AAB boundary: PASS"
 echo "  package=com.mrkimkim.dungeonoffice minSdk=24 targetSdk=36 ABI=arm64-v8a"
-echo "  forbidden-permissions=absent remote-SDKs=absent allowBackup=false"
+echo "  VIBRATE=present forbidden-permissions=absent remote-SDKs=absent allowBackup=false"
 echo "  game=true HOME=absent launcher=present signer=1 legal-bundle=complete"
 echo "  upload-cert-sha256=${ACTUAL_FINGERPRINT} pin-source=${EXPECTED_SOURCE}"
