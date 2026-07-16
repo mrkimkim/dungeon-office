@@ -1,0 +1,27 @@
+# Godot generated files
+.godot/
+.import/
+export.cfg
+export_credentials.cfg
+
+# Local builds and editor state
+build/
+dist/
+.DS_Store
+*.tmp
+*.log
+*.apk
+*.aab
+
+# Local Android signing material must never be committed
+*.keystore
+*.jks
+*.p12
+*.pem
+
+# Godot installs its version-matched Gradle template here only for AAB export.
+# It contains generated caches and large engine AARs and is recreated on demand.
+android/
+
+# Local tool downloads
+.tools/

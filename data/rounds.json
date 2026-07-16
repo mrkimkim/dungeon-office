@@ -1,0 +1,132 @@
+{
+  "schema": "RoundCatalogV1",
+  "data_version": 1,
+  "source_documents": [
+    {"id": "CNT-MVP-ROUND-001", "version": "0.1.0"},
+    {"id": "SYS-PROG-001", "version": "0.2.0"},
+    {"id": "SYS-ECON-001", "version": "0.1.0"},
+    {"id": "BAL-MVP-001", "version": "0.2.0"}
+  ],
+  "client": {"id": "CLIENT_MVP_01", "display_name": "새싹 원정대"},
+  "rounds": [
+    {
+      "id": "R1",
+      "display_name": "첫 납품",
+      "deadline_ticks": 1800,
+      "active_request_slots": 1,
+      "worker_count": 2,
+      "inventory_capacity": 4,
+      "required_capability": "",
+      "supply_items": ["MAT_IRON_ORE"],
+      "facilities": ["FAC_SUPPLY", "FAC_FURNACE", "FAC_WEAPON_BENCH", "FAC_DELIVERY", "FAC_TRASH"],
+      "cutlines": [10, 20, 30],
+      "rewards": {"0": 0, "1": 20, "2": 30, "3": 45},
+      "first_clear_bonus": 20,
+      "events": [
+        {"event_id": "R1-E1", "request_id": "REQ_DAGGER_STD", "release_tick": 0},
+        {"event_id": "R1-E2", "request_id": "REQ_DAGGER_STD", "release_tick": 500},
+        {"event_id": "R1-E3", "request_id": "REQ_DAGGER_STD", "release_tick": 1000}
+      ]
+    },
+    {
+      "id": "R2",
+      "display_name": "두 손의 리듬",
+      "deadline_ticks": 2400,
+      "active_request_slots": 2,
+      "worker_count": 2,
+      "inventory_capacity": 4,
+      "required_capability": "",
+      "supply_items": ["MAT_IRON_ORE"],
+      "facilities": ["FAC_SUPPLY", "FAC_FURNACE", "FAC_WEAPON_BENCH", "FAC_DELIVERY", "FAC_TRASH"],
+      "cutlines": [30, 60, 80],
+      "rewards": {"0": 0, "1": 20, "2": 30, "3": 45},
+      "first_clear_bonus": 20,
+      "events": [
+        {"event_id": "R2-E1", "request_id": "REQ_DAGGER_STD", "release_tick": 0},
+        {"event_id": "R2-E2", "request_id": "REQ_SWORD_STD", "release_tick": 0},
+        {"event_id": "R2-E3", "request_id": "REQ_DAGGER_STD", "release_tick": 600},
+        {"event_id": "R2-E4", "request_id": "REQ_SWORD_STD", "release_tick": 800},
+        {"event_id": "R2-E5", "request_id": "REQ_DAGGER_STD", "release_tick": 1400},
+        {"event_id": "R2-E6", "request_id": "REQ_SWORD_STD", "release_tick": 1600}
+      ]
+    },
+    {
+      "id": "R3",
+      "display_name": "바쁜 주문대",
+      "deadline_ticks": 2400,
+      "active_request_slots": 3,
+      "worker_count": 2,
+      "inventory_capacity": 4,
+      "required_capability": "",
+      "supply_items": ["MAT_IRON_ORE"],
+      "facilities": ["FAC_SUPPLY", "FAC_FURNACE", "FAC_WEAPON_BENCH", "FAC_DELIVERY", "FAC_TRASH"],
+      "cutlines": [50, 90, 120],
+      "rewards": {"0": 0, "1": 20, "2": 30, "3": 45},
+      "first_clear_bonus": 20,
+      "events": [
+        {"event_id": "R3-E1", "request_id": "REQ_DAGGER_RUSH", "release_tick": 0},
+        {"event_id": "R3-E2", "request_id": "REQ_SWORD_RUSH", "release_tick": 0},
+        {"event_id": "R3-E3", "request_id": "REQ_DAGGER_RUSH", "release_tick": 160},
+        {"event_id": "R3-E4", "request_id": "REQ_SWORD_RUSH", "release_tick": 320},
+        {"event_id": "R3-E5", "request_id": "REQ_DAGGER_RUSH", "release_tick": 480},
+        {"event_id": "R3-E6", "request_id": "REQ_SWORD_RUSH", "release_tick": 640},
+        {"event_id": "R3-E7", "request_id": "REQ_DAGGER_RUSH", "release_tick": 800},
+        {"event_id": "R3-E8", "request_id": "REQ_SWORD_RUSH", "release_tick": 960},
+        {"event_id": "R3-E9", "request_id": "REQ_DAGGER_RUSH", "release_tick": 1120},
+        {"event_id": "R3-E10", "request_id": "REQ_SWORD_RUSH", "release_tick": 1280},
+        {"event_id": "R3-E11", "request_id": "REQ_DAGGER_RUSH", "release_tick": 1440},
+        {"event_id": "R3-E12", "request_id": "REQ_SWORD_RUSH", "release_tick": 1600},
+        {"event_id": "R3-E13", "request_id": "REQ_DAGGER_RUSH", "release_tick": 1760},
+        {"event_id": "R3-E14", "request_id": "REQ_SWORD_RUSH", "release_tick": 1920}
+      ]
+    },
+    {
+      "id": "R4",
+      "display_name": "미리 준비하기",
+      "deadline_ticks": 3000,
+      "active_request_slots": 3,
+      "worker_count": 2,
+      "inventory_capacity": 4,
+      "required_capability": "",
+      "supply_items": ["MAT_IRON_ORE"],
+      "facilities": ["FAC_SUPPLY", "FAC_FURNACE", "FAC_WEAPON_BENCH", "FAC_DELIVERY", "FAC_TRASH"],
+      "cutlines": [40, 80, 120],
+      "rewards": {"0": 0, "1": 20, "2": 30, "3": 45},
+      "first_clear_bonus": 20,
+      "events": [
+        {"event_id": "R4-E1", "request_id": "REQ_DAGGER_STD", "release_tick": 0},
+        {"event_id": "R4-E2", "request_id": "REQ_SWORD_STD", "release_tick": 0},
+        {"event_id": "R4-E3", "request_id": "REQ_DAGGER_STD", "release_tick": 500},
+        {"event_id": "R4-E4", "request_id": "REQ_SWORD_STD", "release_tick": 900},
+        {"event_id": "R4-E5", "request_id": "REQ_DAGGER_STD", "release_tick": 1300},
+        {"event_id": "R4-E6", "request_id": "REQ_SWORD_STD", "release_tick": 1700},
+        {"event_id": "R4-E7", "request_id": "REQ_DAGGER_STD", "release_tick": 2100},
+        {"event_id": "R4-E8", "request_id": "REQ_SWORD_FORECAST", "release_tick": 2520}
+      ]
+    },
+    {
+      "id": "R5",
+      "display_name": "첫 강화 계약",
+      "deadline_ticks": 3600,
+      "active_request_slots": 3,
+      "worker_count": 2,
+      "inventory_capacity": 4,
+      "required_capability": "enhancement_capability_owned",
+      "supply_items": ["MAT_IRON_ORE", "MAT_WOOD", "MAT_MANA_SHARD"],
+      "facilities": ["FAC_SUPPLY", "FAC_FURNACE", "FAC_WEAPON_BENCH", "FAC_SYNTH_BENCH", "FAC_ENHANCE_ANVIL", "FAC_DELIVERY", "FAC_TRASH"],
+      "cutlines": [60, 110, 170],
+      "rewards": {"0": 0, "1": 20, "2": 30, "3": 45},
+      "first_clear_bonus": 20,
+      "events": [
+        {"event_id": "R5-E1", "request_id": "REQ_DAGGER_STD", "release_tick": 0},
+        {"event_id": "R5-E2", "request_id": "REQ_SWORD_STD", "release_tick": 0},
+        {"event_id": "R5-E3", "request_id": "REQ_DAGGER_STD", "release_tick": 600},
+        {"event_id": "R5-E4", "request_id": "REQ_DAGGER_P1", "release_tick": 900},
+        {"event_id": "R5-E5", "request_id": "REQ_SWORD_STD", "release_tick": 1400},
+        {"event_id": "R5-E6", "request_id": "REQ_DAGGER_STD", "release_tick": 1900},
+        {"event_id": "R5-E7", "request_id": "REQ_SWORD_STD", "release_tick": 2300},
+        {"event_id": "R5-E8", "request_id": "REQ_SWORD_P1_FORECAST", "release_tick": 2900}
+      ]
+    }
+  ]
+}

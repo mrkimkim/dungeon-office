@@ -1,0 +1,53 @@
+name: Godot CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  GODOT_VERSION: 4.7-stable
+  GODOT_BIN: ${{ github.workspace }}/.tools/godot
+
+jobs:
+  headless-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install CI dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ripgrep
+          rg --version
+
+      - name: Install Godot 4.7-stable
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .tools
+          archive="Godot_v${GODOT_VERSION}_linux.x86_64.zip"
+          curl --fail --location --retry 3 \
+            "https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}/${archive}" \
+            --output "/tmp/${archive}"
+          curl --fail --location --retry 3 \
+            "https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}/SHA512-SUMS.txt" \
+            --output /tmp/SHA512-SUMS.txt
+          (
+            cd /tmp
+            sha512sum --check --ignore-missing SHA512-SUMS.txt
+          )
+          unzip -q "/tmp/${archive}" -d /tmp/godot
+          mv "/tmp/godot/Godot_v${GODOT_VERSION}_linux.x86_64" "${GODOT_BIN}"
+          chmod +x "${GODOT_BIN}"
+          "${GODOT_BIN}" --version
+
+      - name: Verify offline boundary
+        run: ./tools/check_offline.sh
+
+      - name: Run headless tests
+        run: ./tools/test.sh
