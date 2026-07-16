@@ -58,6 +58,7 @@ var _feedback_expires_at: int = 0
 var _snapshot_save_failed: bool = false
 var _confirm_cancel_callback: Callable
 var _discard_next_play_delta: bool = true
+var _pending_commands: Array[Dictionary] = []
 var _pending_play_effects: Array[Dictionary] = []
 var _pending_drop_render: bool = false
 
@@ -94,10 +95,17 @@ func _process(delta: float) -> void:
 	_refresh_accumulator += safe_delta
 	_autosave_accumulator += safe_delta
 	var advanced := false
+	var processed_commands := false
 	while _tick_accumulator >= tick_seconds:
 		_tick_accumulator -= tick_seconds
-		var result := _step_commands([])
+		var commands: Array = []
+		if not _pending_commands.is_empty():
+			commands = _pending_commands.duplicate(true)
+			_pending_commands.clear()
+			processed_commands = true
+		var result := _step_commands(commands)
 		advanced = true
+		_consume_command_rejections(result.get("command_results", []))
 		_consume_events(result.get("events", []))
 		if str(_round_state.get("status", "")) != "running":
 			break
@@ -111,7 +119,13 @@ func _process(delta: float) -> void:
 	if _autosave_accumulator >= AUTOSAVE_INTERVAL_SECONDS:
 		_autosave_accumulator = 0.0
 		_save_snapshot()
-	if advanced and _refresh_accumulator >= PLAY_REFRESH_SECONDS:
+	elif processed_commands:
+		# Persist accepted fixed-tick input without waiting for the periodic autosave.
+		_save_snapshot()
+	if advanced and (
+		_refresh_accumulator >= PLAY_REFRESH_SECONDS
+		or processed_commands
+	):
 		_refresh_accumulator = 0.0
 		_render_play()
 
@@ -388,6 +402,7 @@ func _continue_game() -> void:
 	if not _has_valid_snapshot():
 		_show_map()
 		return
+	_pending_commands.clear()
 	var snapshot: Dictionary = _snapshot_result.get("value", {})
 	_round_state = snapshot.get("round_state", {}).duplicate(true)
 	_run_id = str(snapshot.get("run_id", ""))
@@ -405,12 +420,14 @@ func _continue_game() -> void:
 		return
 	_selected_source = {}
 	if not bool(_round_state.get("paused", false)):
-		var command := SimContractScript.command(
-			int(_round_state.get("tick", 0)),
-			int(_round_state.get("next_command_sequence", 1)),
-			SimContractScript.COMMAND_PAUSE
-		)
-		_step_commands([command])
+		if not _dispatch_command(SimContractScript.COMMAND_PAUSE):
+			_show_retryable_error(
+				"중단 저장 오류",
+				"복원한 라운드를 안전하게 일시정지하지 못했습니다.",
+				_continue_game,
+				_show_title
+			)
+			return
 	_save_snapshot()
 	_show_pause("중단한 시점에서 복원했습니다. 준비되면 재개하세요.")
 
@@ -667,6 +684,7 @@ func _start_round(round_id: String) -> void:
 	_run_id = str(allocation["run_id"])
 	_round_state = RoundSimulatorScript.create_state(_round_definition, _data_repository.catalog)
 	_selected_source = {}
+	_pending_commands.clear()
 	_tick_accumulator = 0.0
 	_refresh_accumulator = 0.0
 	_autosave_accumulator = 0.0
@@ -825,25 +843,70 @@ func _on_store_requested(facility_id: String) -> void:
 
 
 func _dispatch_command(type: String, payload: Dictionary = {}) -> bool:
+	if type in [SimContractScript.COMMAND_PAUSE, SimContractScript.COMMAND_RESUME]:
+		return _dispatch_control_command(type, payload)
+	return _queue_gameplay_command(type, payload)
+
+
+func _queue_gameplay_command(type: String, payload: Dictionary) -> bool:
+	var tick := int(_round_state.get("tick", 0))
+	var sequence := int(_round_state.get("next_command_sequence", 1)) + _pending_commands.size()
 	var command := SimContractScript.command(
-		int(_round_state.get("tick", 0)),
-		int(_round_state.get("next_command_sequence", 1)),
+		tick,
+		sequence,
 		type,
 		payload
 	)
-	var step_result := _step_commands([command])
+	var preview_commands: Array = _pending_commands.duplicate(true)
+	preview_commands.append(command)
+	var preview := RoundSimulatorScript.step(
+		_round_state,
+		preview_commands,
+		_round_definition,
+		_data_repository.catalog
+	)
+	var preview_results: Array = preview.get("command_results", [])
+	if preview_results.size() != preview_commands.size():
+		_set_feedback("명령 결과를 확인할 수 없습니다.")
+		return false
+	var result: Dictionary = preview_results[-1]
+	if not bool(result.get("accepted", false)):
+		_set_feedback(_reject_message(str(result.get("reason", "unknown"))))
+		return false
+	_pending_commands.append(command)
+	return true
+
+
+func _dispatch_control_command(type: String, payload: Dictionary) -> bool:
+	# Pause/resume remains a zero-tick control boundary. If a gameplay intent arrived
+	# just before the control request, apply both atomically without advancing work,
+	# patience, overheat, or the deadline, then freeze the resulting state.
+	var commands: Array = _pending_commands.duplicate(true)
+	_pending_commands.clear()
+	commands.append(SimContractScript.command(
+		int(_round_state.get("tick", 0)),
+		int(_round_state.get("next_command_sequence", 1)) + commands.size(),
+		type,
+		payload
+	))
+	var step_result := _step_commands(commands)
 	var command_results: Array = step_result.get("command_results", [])
+	_consume_command_rejections(command_results)
+	_consume_events(step_result.get("events", []))
+	_save_snapshot()
 	if command_results.is_empty():
 		_set_feedback("명령 결과를 확인할 수 없습니다.")
 		return false
-	var result: Dictionary = command_results[0]
-	if not bool(result.get("accepted", false)):
-		_set_feedback(_reject_message(str(result.get("reason", "unknown"))))
-		_save_snapshot()
-		return false
-	_consume_events(result.get("events", []))
-	_save_snapshot()
-	return true
+	return bool(command_results[-1].get("accepted", false))
+
+
+func _consume_command_rejections(command_results: Array) -> void:
+	for result_value: Variant in command_results:
+		if not result_value is Dictionary:
+			continue
+		var result: Dictionary = result_value
+		if not bool(result.get("accepted", false)):
+			_set_feedback(_reject_message(str(result.get("reason", "unknown"))))
 
 
 func _step_commands(commands: Array) -> Dictionary:
@@ -858,6 +921,7 @@ func _step_commands(commands: Array) -> Dictionary:
 
 
 func _consume_events(events: Array) -> void:
+	var deferred_overheat_loss: Dictionary = {}
 	for event_value: Variant in events:
 		if not event_value is Dictionary:
 			continue
@@ -867,7 +931,27 @@ func _consume_events(events: Array) -> void:
 				_set_feedback("작업을 시작했습니다.")
 				_play_tone(440.0, 0.06)
 			"work_completed":
-				_set_feedback("✓ 작업이 끝났습니다. 산출물을 회수하세요.")
+				if str(event.get("facility_id", "")) == "FAC_FURNACE":
+					var tick_rate := maxi(
+						1,
+						int(_data_repository.catalog.get("rules", {}).get("tick_rate", 20))
+					)
+					var grace_seconds := ceili(
+						float(
+							int(
+								_data_repository.catalog.get("rules", {}).get(
+									"overheat_grace_ticks",
+									0
+								)
+							)
+						) / float(tick_rate)
+					)
+					_set_feedback(
+						"🔥 제련 완료 · %d초 안에 옮기지 않으면 소실됩니다." % grace_seconds,
+						5.0
+					)
+				else:
+					_set_feedback("✓ 작업이 끝났습니다. 산출물을 회수하세요.")
 				_play_tone(660.0, 0.1, true)
 			"delivered":
 				var delivery_effect: Dictionary = event.duplicate(true)
@@ -879,11 +963,12 @@ func _consume_events(events: Array) -> void:
 			"item_moved", "item_stored":
 				_play_tone(520.0, 0.04)
 			"overheat_danger", "overheat_danger_entered":
-				_set_feedback("! 용광로 산출물이 곧 과열됩니다.", 4.0)
+				_set_feedback("⚠ 과열 임박 · 용광로 산출물을 지금 옮기세요!", 4.0)
 				_play_tone(240.0, 0.15, true)
 			"overheat_loss":
-				_set_feedback("! 과열로 산출물을 잃었습니다.", 4.0)
-				_play_tone(150.0, 0.2, true)
+				# Loss is the highest-priority in-round feedback. Defer it until every
+				# lower-priority completion/withdrawal event in the same tick is handled.
+				deferred_overheat_loss = event
 			"request_urgent", "request_urgent_entered":
 				_set_feedback("의뢰 인내가 얼마 남지 않았습니다.")
 				_play_tone(320.0, 0.1)
@@ -896,12 +981,32 @@ func _consume_events(events: Array) -> void:
 			"deadline_countdown", "deadline_countdown_entered":
 				_set_feedback("마감까지 10초 남았습니다.")
 				_play_tone(420.0, 0.12, true)
+	if not deferred_overheat_loss.is_empty():
+		_show_overheat_loss(deferred_overheat_loss)
+
+
+func _show_overheat_loss(event: Dictionary) -> void:
+	var lost_item: Dictionary = (
+		event.get("item", {}) if event.get("item", {}) is Dictionary else {}
+	)
+	var item_id := str(lost_item.get("item_id", ""))
+	var item_definition := DataRepositoryScript.find_by_id(
+		_data_repository.catalog.get("items", []),
+		item_id
+	)
+	var item_name := str(item_definition.get("display_name", "산출물"))
+	_set_feedback("🔥 과열 소실 · 잃은 산출물: %s" % item_name, 5.0)
+	_play_tone(150.0, 0.2, true)
 
 
 func _pause_round() -> void:
-	if _screen != "play" or bool(_round_state.get("paused", false)):
+	if _screen != "play":
 		return
-	_dispatch_command(SimContractScript.COMMAND_PAUSE)
+	if _settle_ended_round_if_needed() or bool(_round_state.get("paused", false)):
+		return
+	if not _dispatch_command(SimContractScript.COMMAND_PAUSE):
+		_render_play()
+		return
 	set_process(false)
 	_show_pause()
 
@@ -911,6 +1016,8 @@ func _show_recipe_guide(item_id: String, enhancement_level: int) -> void:
 		return
 	if not bool(_round_state.get("paused", false)):
 		if not _dispatch_command(SimContractScript.COMMAND_PAUSE):
+			if _settle_ended_round_if_needed():
+				return
 			_render_play()
 			return
 	set_process(false)
@@ -1119,11 +1226,25 @@ func _recipe_amount_text(amount_value: Variant) -> String:
 
 
 func _pause_for_interruption() -> void:
-	if _screen != "play" or bool(_round_state.get("paused", false)):
+	if _screen != "play":
 		return
-	_dispatch_command(SimContractScript.COMMAND_PAUSE)
+	if _settle_ended_round_if_needed() or bool(_round_state.get("paused", false)):
+		return
+	if not _dispatch_command(SimContractScript.COMMAND_PAUSE):
+		_render_play()
+		return
 	set_process(false)
 	_show_pause("앱이 백그라운드로 이동해 자동으로 일시정지했습니다.")
+
+
+func _settle_ended_round_if_needed() -> bool:
+	if str(_round_state.get("status", "")) != "ended":
+		return false
+	_pending_commands.clear()
+	set_process(false)
+	_save_snapshot()
+	_settle_round()
+	return true
 
 
 func _show_pause(message: String = "시간·작업·의뢰·과열이 모두 멈췄습니다.") -> void:
@@ -1287,6 +1408,7 @@ func _abandon_snapshot() -> void:
 		_notice = "중단 저장을 삭제하지 못했습니다."
 	else:
 		_snapshot_result = {"status": "missing", "value": {}, "errors": []}
+		_pending_commands.clear()
 		_round_state = {}
 		_run_id = ""
 		_notice = "진행 중이던 판을 포기했습니다. 완료 기록은 유지됩니다."
@@ -1304,6 +1426,7 @@ func _discard_broken_snapshot() -> void:
 
 
 func _settle_round() -> void:
+	_pending_commands.clear()
 	_pending_settlement = SettlementServiceScript.calculate(_round_definition, _round_state, _run_id)
 	_commit_settlement()
 

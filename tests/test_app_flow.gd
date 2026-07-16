@@ -4,6 +4,7 @@ const DataRepositoryScript = preload("res://src/data/data_repository.gd")
 const LegalRepositoryScript = preload("res://src/data/legal_text_repository.gd")
 const ProfileScript = preload("res://src/app/profile_v1.gd")
 const SaveRepositoryScript = preload("res://src/app/save_repository.gd")
+const SimContractScript = preload("res://src/sim/sim_contract.gd")
 const MainScript = preload("res://src/ui/main.gd")
 
 const TEST_ROOT: String = "user://tests/app_flow"
@@ -159,12 +160,35 @@ static func run(test: TestFramework) -> void:
 	var deliveries_before_rejected_delivery: int = int(
 		app._round_state.get("deliveries", []).size()
 	)
+	app._tick_accumulator = 0.0
+	var tick_before_rejected_delivery := int(app._round_state.get("tick", 0))
 	test.assert_false(
 		app._attempt_item_transfer(
 			{"kind": "supply", "item_id": "MAT_IRON_ORE"},
 			{"kind": "delivery"}
 		),
 		"delivery rejects raw materials"
+	)
+	test.assert_equal(
+		int(app._round_state.get("tick", 0)),
+		tick_before_rejected_delivery,
+		"a rejected input cannot advance simulation before the fixed tick"
+	)
+	for _rejected_tap: int in range(20):
+		app._attempt_item_transfer(
+			{"kind": "supply", "item_id": "MAT_IRON_ORE"},
+			{"kind": "delivery"}
+		)
+	test.assert_equal(
+		int(app._round_state.get("tick", 0)),
+		tick_before_rejected_delivery,
+		"rapid rejected taps cannot fast-forward work, overheat, or deadline timers"
+	)
+	app._process(1.0 / 20.0)
+	test.assert_equal(
+		int(app._round_state.get("tick", 0)),
+		tick_before_rejected_delivery + 1,
+		"only elapsed 20 Hz wall time advances the authoritative simulation"
 	)
 	test.assert_equal(
 		int(app._round_state.get("score", 0)),
@@ -180,14 +204,82 @@ static func run(test: TestFramework) -> void:
 		app._pending_play_effects.is_empty(),
 		"a rejected delivery cannot queue success feedback"
 	)
+	var furnace_before_loss: Dictionary = app._round_state["facilities"]["FAC_FURNACE"]
+	furnace_before_loss["status"] = "output"
+	furnace_before_loss["output"] = {
+		"item_id": "MAT_IRON_INGOT",
+		"enhancement_level": 0,
+	}
+	furnace_before_loss["overheat_remaining_ticks"] = 1
+	var loss_count_before_command := int(app._round_state.get("overheat_loss_count", 0))
+	var tick_before_queued_command := int(app._round_state.get("tick", 0))
+	test.assert_true(
+		app._attempt_item_transfer(
+			{"kind": "supply", "item_id": "MAT_IRON_ORE"},
+			{"kind": "inventory", "slot": 0}
+		),
+		"a legal unrelated command queues for the final overheat tick"
+	)
+	test.assert_equal(
+		int(app._round_state.get("tick", 0)),
+		tick_before_queued_command,
+		"an accepted command also waits for the next fixed tick"
+	)
+	test.assert_equal(app._pending_commands.size(), 1, "the accepted intent is queued exactly once")
+	test.assert_true(
+		app._dispatch_command(SimContractScript.COMMAND_PAUSE),
+		"pause atomically preserves a just-queued gameplay intent"
+	)
+	test.assert_equal(int(app._round_state.get("tick", 0)), tick_before_queued_command, "pause is zero-tick")
+	test.assert_true(
+		app._round_state["facilities"]["FAC_FURNACE"].get("output") is Dictionary,
+		"pause cannot consume the last overheat grace tick"
+	)
+	test.assert_equal(
+		str(app._round_state["inventory"][0].get("item_id", "")),
+		"MAT_IRON_ORE",
+		"the queued move is not lost at the pause boundary"
+	)
+	test.assert_true(
+		app._dispatch_command(SimContractScript.COMMAND_RESUME),
+		"the fixed-tick test resumes without spending time"
+	)
+	app._process(1.0 / 20.0)
+	test.assert_equal(
+		int(app._round_state.get("overheat_loss_count", 0)),
+		loss_count_before_command + 1,
+		"the next elapsed tick applies the pending overheat loss once"
+	)
+	test.assert_contains(
+		app._feedback,
+		"과열",
+		"the app consumes the step-level overheat event from that fixed tick"
+	)
+	app._consume_events([
+		{
+			"type": "overheat_loss",
+			"item": {"item_id": "MAT_IRON_INGOT", "enhancement_level": 0},
+		},
+		{"type": "request_withdrawn"},
+	])
+	test.assert_contains(
+		app._feedback,
+		"과열 소실",
+		"lower-priority same-tick feedback cannot hide an item loss"
+	)
+	test.assert_true(
+		app._round_state["facilities"]["FAC_FURNACE"].get("output") == null,
+		"the overheat feedback corresponds to the authoritative cleared output"
+	)
 
 	app._on_item_drop_requested(
-		{"kind": "supply", "item_id": "MAT_IRON_ORE"},
+		{"kind": "inventory", "slot": 0},
 		{
 			"kind": "facility_input",
 			"facility_id": "FAC_FURNACE",
 		}
 	)
+	app._process(1.0 / 20.0)
 	test.assert_equal(
 		str(app._round_state["facilities"]["FAC_FURNACE"].get("status", "")),
 		"working",
@@ -198,6 +290,7 @@ static func run(test: TestFramework) -> void:
 		{"kind": "facility_output", "facility_id": "FAC_FURNACE"},
 		{"kind": "inventory", "slot": 0}
 	)
+	app._process(1.0 / 20.0)
 	test.assert_equal(
 		str(app._round_state["inventory"][0].get("item_id", "")),
 		"MAT_IRON_INGOT",
@@ -211,6 +304,7 @@ static func run(test: TestFramework) -> void:
 		}
 	)
 	app._on_start_requested("FAC_WEAPON_BENCH")
+	app._process(1.0 / 20.0)
 	test.assert_equal(
 		str(app._round_state["facilities"]["FAC_WEAPON_BENCH"].get("status", "")),
 		"working",
@@ -221,6 +315,7 @@ static func run(test: TestFramework) -> void:
 		{"kind": "facility_output", "facility_id": "FAC_WEAPON_BENCH"},
 		{"kind": "delivery"}
 	)
+	app._process(1.0 / 20.0)
 	test.assert_equal(int(app._round_state.get("score", 0)), 10, "direct R1 cycle awards score")
 	test.assert_equal(app._round_state.get("deliveries", []).size(), 1, "direct R1 cycle records delivery")
 	test.assert_true(app._selected_source.is_empty(), "atomic drops leave no stale tap selection")
@@ -280,20 +375,21 @@ static func run(test: TestFramework) -> void:
 	app._show_brief("R1")
 	app._start_round("R1")
 	app._round_state["deadline_ticks"] = int(app._round_state.get("tick", 0)) + 1
+	app._discard_next_play_delta = false
 	app._on_item_drop_requested(
 		{"kind": "supply", "item_id": "MAT_IRON_ORE"},
 		{"kind": "inventory", "slot": 0}
 	)
 	test.assert_equal(
 		str(app._round_state.get("status", "")),
-		"ended",
-		"a command on the final tick can end a round"
+		"running",
+		"a final-tick command remains queued until wall time reaches that tick"
 	)
-	app._process(0.0)
+	app._process(1.0 / 20.0)
 	test.assert_equal(
 		app._screen,
 		"result",
-		"a round ended by the final input command is settled on the next process pass"
+		"a final fixed tick applies the command and settles exactly once"
 	)
 
 	app.free()

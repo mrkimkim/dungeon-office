@@ -40,6 +40,7 @@ static func run(test: TestFramework) -> void:
 	_test_waiting_request_activation(repository, test)
 	_test_simultaneous_withdrawal_order(repository, test)
 	_test_facility_status_after_input_recovery(repository, test)
+	_test_output_lifetimes(repository, test)
 	_test_threshold_events(repository, test)
 	_test_round_read_model(repository, test)
 
@@ -378,6 +379,98 @@ static func _test_facility_status_after_input_recovery(
 		state["facilities"]["FAC_WEAPON_BENCH"].get("status"),
 		"ready",
 		"remaining exact dagger recipe is ready after recovering one sword input"
+	)
+
+
+static func _test_output_lifetimes(repository: DataRepository, test: TestFramework) -> void:
+	var round_definition := repository.get_round("R1")
+	var state := RoundSimulatorScript.create_state(round_definition, repository.catalog)
+	var furnace: Dictionary = state["facilities"]["FAC_FURNACE"]
+	furnace["status"] = "output"
+	furnace["output"] = {"item_id": "MAT_IRON_INGOT", "enhancement_level": 0}
+	furnace["overheat_remaining_ticks"] = 2
+	var bench: Dictionary = state["facilities"]["FAC_WEAPON_BENCH"]
+	bench["status"] = "output"
+	bench["output"] = {"item_id": "EQ_DAGGER", "enhancement_level": 0}
+	bench["overheat_remaining_ticks"] = 0
+
+	var first := RoundSimulatorScript.step(state, [], round_definition, repository.catalog)
+	state = first["state"]
+	test.assert_equal(
+		str(state["facilities"]["FAC_FURNACE"].get("status", "")),
+		"output",
+		"a hot furnace output remains available on its penultimate grace tick"
+	)
+	test.assert_equal(
+		int(state["facilities"]["FAC_FURNACE"].get("overheat_remaining_ticks", -1)),
+		1,
+		"the furnace grace countdown reaches one before any loss"
+	)
+	test.assert_equal(
+		_count_events(first.get("events", []), "overheat_loss"),
+		0,
+		"the furnace output cannot disappear before grace reaches zero"
+	)
+
+	var second := RoundSimulatorScript.step(state, [], round_definition, repository.catalog)
+	state = second["state"]
+	test.assert_equal(
+		str(state["facilities"]["FAC_FURNACE"].get("status", "")),
+		"empty",
+		"only the furnace output clears when its explicit grace reaches zero"
+	)
+	test.assert_true(
+		state["facilities"]["FAC_FURNACE"].get("output") == null,
+		"overheat loss removes the expired furnace output from authoritative state"
+	)
+	test.assert_equal(
+		_count_events(second.get("events", []), "overheat_loss"),
+		1,
+		"overheat expiration emits one visible loss event"
+	)
+	test.assert_equal(
+		int(state.get("overheat_loss_count", 0)),
+		1,
+		"overheat expiration records one loss"
+	)
+	test.assert_equal(
+		str(state["facilities"]["FAC_WEAPON_BENCH"]["output"].get("item_id", "")),
+		"EQ_DAGGER",
+		"a non-hot crafted item survives the furnace expiration tick"
+	)
+
+	for _extra_tick: int in range(200):
+		state = RoundSimulatorScript.step(state, [], round_definition, repository.catalog)["state"]
+	test.assert_equal(
+		str(state["facilities"]["FAC_WEAPON_BENCH"]["output"].get("item_id", "")),
+		"EQ_DAGGER",
+		"crafted equipment never expires merely because time passes"
+	)
+	for request_value: Variant in state.get("active_requests", []):
+		request_value["remaining_patience_ticks"] = 1
+	var withdrawal_step := RoundSimulatorScript.step(
+		state,
+		[],
+		round_definition,
+		repository.catalog
+	)
+	state = withdrawal_step["state"]
+	test.assert_true(
+		_count_events(withdrawal_step.get("events", []), "request_withdrawn") > 0,
+		"the lifetime fixture crosses an actual request-withdrawal boundary"
+	)
+	test.assert_equal(
+		str(state["facilities"]["FAC_WEAPON_BENCH"]["output"].get("item_id", "")),
+		"EQ_DAGGER",
+		"request withdrawal cannot delete already crafted equipment"
+	)
+	state["deadline_ticks"] = int(state.get("tick", 0)) + 1
+	state = RoundSimulatorScript.step(state, [], round_definition, repository.catalog)["state"]
+	test.assert_equal(str(state.get("status", "")), "ended", "the fixture reaches the round deadline")
+	test.assert_equal(
+		str(state["facilities"]["FAC_WEAPON_BENCH"]["output"].get("item_id", "")),
+		"EQ_DAGGER",
+		"the deadline transition does not masquerade as an equipment-expiry rule"
 	)
 
 static func _test_threshold_events(repository: DataRepository, test: TestFramework) -> void:

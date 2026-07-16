@@ -387,6 +387,11 @@ func _make_structure_signature() -> String:
 				facility["output"].get("item_id", ""),
 				int(facility["output"].get("enhancement_level", 0)),
 			])
+		var overheat_ticks := int(facility.get("overheat_remaining_ticks", 0))
+		var danger_ticks := int(_catalog.get("rules", {}).get("overheat_danger_ticks", 0))
+		parts.append("overheat-danger:%s" % str(
+			overheat_ticks > 0 and overheat_ticks <= danger_ticks
+		))
 	for item_value: Variant in _round_state.get("inventory", []):
 		if item_value == null:
 			parts.append("inventory:-")
@@ -445,7 +450,10 @@ func _update_dynamic_text(feedback: String) -> void:
 		var status_label := find_child("FacilityStatus_%s" % facility_id, true, false) as Label
 		if status_label != null:
 			status_label.text = _facility_status_text(facility)
-			status_label.modulate = _status_color(str(facility.get("status", "empty")))
+			status_label.modulate = _status_color(facility)
+		var overheat_bar := find_child("OverheatBar_%s" % facility_id, true, false) as ProgressBar
+		if overheat_bar != null:
+			overheat_bar.value = maxi(0, int(facility.get("overheat_remaining_ticks", 0)))
 	var workers: Array = _round_state.get("workers", [])
 	var idle_workers := 0
 	for worker_value: Variant in workers:
@@ -798,7 +806,7 @@ func _build_facility_cell(parent: Container, facility_id: String) -> void:
 		box,
 		_facility_status_text(facility),
 		9,
-		_status_color(status),
+		_status_color(facility),
 		HORIZONTAL_ALIGNMENT_CENTER
 	)
 	status_label.name = "FacilityStatus_%s" % facility_id
@@ -807,6 +815,31 @@ func _build_facility_cell(parent: Container, facility_id: String) -> void:
 	status_label.autowrap_mode = TextServer.AUTOWRAP_OFF
 	status_label.max_lines_visible = 1
 	status_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	var overheat_ticks := int(facility.get("overheat_remaining_ticks", 0))
+	if overheat_ticks > 0:
+		var overheat_bar := ProgressBar.new()
+		overheat_bar.name = "OverheatBar_%s" % facility_id
+		overheat_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		overheat_bar.show_percentage = false
+		overheat_bar.min_value = 0
+		overheat_bar.max_value = maxi(
+			1,
+			int(_catalog.get("rules", {}).get("overheat_grace_ticks", overheat_ticks))
+		)
+		overheat_bar.value = overheat_ticks
+		status_label.add_child(overheat_bar)
+		overheat_bar.anchor_left = 0.0
+		overheat_bar.anchor_top = 1.0
+		overheat_bar.anchor_right = 1.0
+		overheat_bar.anchor_bottom = 1.0
+		overheat_bar.offset_left = 2.0
+		overheat_bar.offset_top = -3.0
+		overheat_bar.offset_right = -2.0
+		overheat_bar.offset_bottom = 0.0
+		_style_overheat_bar(overheat_bar, bool(
+			overheat_ticks
+			<= int(_catalog.get("rules", {}).get("overheat_danger_ticks", 0))
+		))
 
 	var content_spacer := Control.new()
 	content_spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -869,7 +902,16 @@ func _build_facility_cell(parent: Container, facility_id: String) -> void:
 		output_button.name = "SourceOutput_%s" % facility_id
 		output_button.custom_minimum_size = Vector2(44, 48)
 		output_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-		_apply_button_style(output_button, "complete_slot")
+		var output_style := "complete_slot"
+		if overheat_ticks > 0:
+			output_style = (
+				"overheat_danger"
+				if overheat_ticks <= int(
+					_catalog.get("rules", {}).get("overheat_danger_ticks", 0)
+				)
+				else "overheat_hot"
+			)
+		_apply_button_style(output_button, output_style)
 		_decorate_item_button(
 			output_button,
 			str(output.get("item_id", "")),
@@ -1522,6 +1564,20 @@ func _apply_button_style(button: Button, kind: String) -> void:
 			hover = Color("2e4c40")
 			pressed = Color("1b2f28")
 			radius = 11
+		"overheat_hot":
+			background = Color("4b3022")
+			border = Color("e69a4f")
+			hover = Color("62402a")
+			pressed = Color("38241b")
+			font = Color("fff2d2")
+			radius = 11
+		"overheat_danger":
+			background = Color("5a2424")
+			border = Color("ff6659")
+			hover = Color("74302d")
+			pressed = Color("431b1b")
+			font = Color("fff0e8")
+			radius = 11
 		"supply_slot":
 			background = Color("243842")
 			border = Color("5f9db3")
@@ -1748,22 +1804,59 @@ func _facility_status_text(facility: Dictionary) -> String:
 			var overheat_ticks := int(facility.get("overheat_remaining_ticks", 0))
 			if overheat_ticks > 0:
 				var tick_rate := maxi(1, int(_catalog.get("rules", {}).get("tick_rate", 20)))
-				return prefix + "완료 · 과열 %d초" % ceili(float(overheat_ticks) / float(tick_rate))
-			return prefix + "완료!"
+				var remaining_seconds := ceili(float(overheat_ticks) / float(tick_rate))
+				var danger_ticks := int(
+					_catalog.get("rules", {}).get("overheat_danger_ticks", 0)
+				)
+				if overheat_ticks <= danger_ticks:
+					return prefix + "⚠ %d초 뒤 소실" % remaining_seconds
+				return prefix + "🔥 %d초 내 이동" % remaining_seconds
+			return prefix + "완료품 대기"
 		_:
 			return prefix + status
 
 
-func _status_color(status: String) -> Color:
+func _status_color(facility: Dictionary) -> Color:
+	var status := str(facility.get("status", "empty"))
 	match status:
 		"ready":
 			return Color("9cd68b")
 		"working":
 			return Color("8ec5e8")
 		"output":
+			var overheat_ticks := int(facility.get("overheat_remaining_ticks", 0))
+			if overheat_ticks > 0:
+				var danger_ticks := int(
+					_catalog.get("rules", {}).get("overheat_danger_ticks", 0)
+				)
+				if overheat_ticks <= danger_ticks:
+					# Five ticks per phase gives four visible state changes each second.
+					return (
+						Color("ff5d52")
+						if int(int(_round_state.get("tick", 0)) / 5.0) % 2 == 0
+						else Color("ffd0bd")
+					)
+				return Color("f3a457")
 			return Color("f0bf6a")
 		_:
 			return Color("b9aa95")
+
+
+func _style_overheat_bar(bar: ProgressBar, danger: bool) -> void:
+	var background := StyleBoxFlat.new()
+	background.bg_color = Color("2b1b1b")
+	background.corner_radius_top_left = 2
+	background.corner_radius_top_right = 2
+	background.corner_radius_bottom_left = 2
+	background.corner_radius_bottom_right = 2
+	var fill := StyleBoxFlat.new()
+	fill.bg_color = Color("ff5d52") if danger else Color("f2a24d")
+	fill.corner_radius_top_left = 2
+	fill.corner_radius_top_right = 2
+	fill.corner_radius_bottom_left = 2
+	fill.corner_radius_bottom_right = 2
+	bar.add_theme_stylebox_override("background", background)
+	bar.add_theme_stylebox_override("fill", fill)
 
 
 func _scaled_font_size(base_size: int) -> int:

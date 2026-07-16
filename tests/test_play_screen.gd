@@ -102,7 +102,11 @@ static func run(test: TestFramework) -> void:
 			},
 		},
 		{
-			"rules": {"tick_rate": 20},
+			"rules": {
+				"tick_rate": 20,
+				"overheat_grace_ticks": 160,
+				"overheat_danger_ticks": 60,
+			},
 			"items": [
 				{
 					"id": "MAT_IRON_ORE",
@@ -447,8 +451,48 @@ static func run(test: TestFramework) -> void:
 	)
 	test.assert_contains(
 		(screen.find_child("FacilityStatus_FAC_FURNACE", true, false) as Label).text,
-		"완료",
-		"facility status must have its own live label"
+		"5초 내 이동",
+		"a hot output names the action and remaining safe time"
+	)
+	var overheat_bar := screen.find_child(
+		"OverheatBar_FAC_FURNACE",
+		true,
+		false
+	) as ProgressBar
+	test.assert_true(overheat_bar != null, "a hot output exposes a persistent visual countdown")
+	test.assert_equal(int(overheat_bar.max_value), 160, "the countdown bar uses the full grace period")
+	test.assert_equal(int(overheat_bar.value), 100, "the countdown bar reflects live remaining grace")
+	test.assert_true(
+		screen.find_child("OverheatBar_FAC_WEAPON_BENCH", true, false) == null,
+		"non-hot worker outputs never receive a misleading expiry indicator"
+	)
+	var danger_state: Dictionary = screen._round_state.duplicate(true)
+	danger_state["tick"] = 25
+	danger_state["facilities"]["FAC_FURNACE"]["overheat_remaining_ticks"] = 60
+	screen.render(
+		screen._round_definition,
+		danger_state,
+		screen._catalog,
+		selected_source,
+		"과열 임박"
+	)
+	var danger_label := screen.find_child(
+		"FacilityStatus_FAC_FURNACE",
+		true,
+		false
+	) as Label
+	test.assert_contains(
+		danger_label.text,
+		"3초 뒤 소실",
+		"the danger phase states the exact consequence before the output disappears"
+	)
+	overheat_bar = screen.find_child("OverheatBar_FAC_FURNACE", true, false) as ProgressBar
+	test.assert_equal(int(overheat_bar.value), 60, "the visual countdown updates at danger entry")
+	var danger_fill := overheat_bar.get_theme_stylebox("fill") as StyleBoxFlat
+	test.assert_equal(
+		danger_fill.bg_color,
+		Color("ff5d52"),
+		"the danger phase changes the persistent countdown from amber to red"
 	)
 	for button_value: Variant in screen.find_children("*", "Button", true, false):
 		var button: Button = button_value
